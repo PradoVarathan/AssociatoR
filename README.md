@@ -4,7 +4,8 @@
 <!-- badges: start -->
 <!-- badges: end -->
 
-The goal of AssociatoR is to ...
+AssociatoR package helps in building association between a given phenotype or clinical variable against the covariates and other dependant variables. It can also perform linear mixed models to obtain the interaction effect over time and study the associations for the same phenotype. The data input must be carefully constructed and tested with a small batch before performing the entire run.
+
 
 ## Installation
 
