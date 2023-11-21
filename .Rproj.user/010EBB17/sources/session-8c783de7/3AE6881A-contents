@@ -1,0 +1,1427 @@
+getwd()
+library(dplyr)
+setwd('C:/Users/ppugale/OneDrive - Indiana University/Documents/AgePredictionProject/')
+predicted_adni_brain_age = read.csv('Oct2023_Results/Predicted_Age_Whole_ADNI_Population_PolyBias.csv')
+name_file_starter = 'Oct2023_Results/Association_Study_ADNI/'
+# areas_from_paper = c("entorhinal_thickness","HippVol", "middletemporal_thickness","inferiortemporal_thickness","transversetemporal_thickness",
+#                      "bankssts_thickness","inferiorparietal_thickness","fusiform_thickness","AmygVol","superiorparietal_thickness","precuneus_thickness",
+#                      "paracentral_thickness","superiortemporal_thickness","supramarginal_thickness","parahippocampal_thickness")
+
+areas_from_paper = c("entorhinal_thickness","HippVol")
+
+
+
+if (TRUE){
+  
+  
+#Data input
+amyloid_adni_data = readxl::read_xlsx('Data/Bings_Data/AV45_DX1234_01062023_intensity_Nor.xlsx')
+demo_adni = read.csv('ADNI_Data/ADNI_Long_Nightingale_Demographics_at_BL.csv')
+apoe_2_subjects = demo_adni$SubjID[which(demo_adni$APOE4 == 2)]
+apoe_1_subjects = demo_adni$SubjID[which(demo_adni$APOE4 == 1)]
+apoe_0_subjects = demo_adni$SubjID[which(demo_adni$APOE4 == 0)]
+apoe_det = demo_adni[,c('RID','APOE4')]
+colnames(apoe_det) = c('RID','APOE')
+mri_adni_data = read.csv('Data/Bings_Data/FREE_DX1234_06232023_PTRACCAT=5.csv')
+
+
+# Obtaining demographic information ---------------------------------------
+
+demo_adni = read.csv('ADNI_Data/ADNI_Long_Nightingale_Demographics_at_BL.csv')
+demo_adni$Sex[which(demo_adni$Sex == 'Male')] = 1
+demo_adni$Sex[which(demo_adni$Sex == 'Female')] = 0
+demo_adni$Sex = as.factor(demo_adni$Sex)
+demo_adni$APOE4 = as.factor(demo_adni$APOE4)
+
+complete_data_w_covariate = merge(predicted_adni_brain_age, demo_adni[,c('RID','Sex','APOE4','BMI','Education')], by = 'RID')
+colnames(complete_data_w_covariate)[which(colnames(complete_data_w_covariate) == 'APOE4')] = 'APOE'
+
+#predicted_adni_brain_age = read.csv('Oct2023_Results/Predicted_Age_Whole_ADNI_Population.csv')
+colnames(predicted_adni_brain_age)[which(colnames(predicted_adni_brain_age) == 'Difference')] = 'delta_age'
+predicted_adni_brain_age = merge(predicted_adni_brain_age,apoe_det,by = 'RID')
+# 
+# for(i in 11:ncol(mri_adni_data)){
+#   mri_adni_data[,i] = as.data.frame(scale(mri_adni_data[,i]))
+# }
+amyloid_adni_data = amyloid_adni_data %>% filter(RID %in% predicted_adni_brain_age$RID)
+mri_adni_data = mri_adni_data %>% filter(RID %in% predicted_adni_brain_age$RID)
+mri_areas = colnames(mri_adni_data)[11:ncol(mri_adni_data)]
+amyloid_areas = colnames(amyloid_adni_data)[14:ncol(amyloid_adni_data)]
+
+mri_adni_data = merge(mri_adni_data,predicted_adni_brain_age, by = c("RID", "VISCODE2"))
+amyloid_adni_data = merge(amyloid_adni_data,predicted_adni_brain_age, by = c("RID", "VISCODE2"))
+mri_adni_data$PTGENDER = as.factor(mri_adni_data$PTGENDER)
+mri_adni_data$APOE = as.factor(mri_adni_data$APOE)
+# MRI ---------------------------------------------------------------------
+mri_areas_hemis = mri_areas[grepl('h_',mri_areas)]
+mri_areas_hemis = unlist(lapply(mri_areas_hemis,function(x){return(strsplit(x,'h_')[[1]][2])}))
+for(space in unique(mri_areas_hemis)){
+  
+  idx_temp = grepl(paste0('_',space),colnames(mri_adni_data),fixed=TRUE)
+  temp_df = mri_adni_data[,idx_temp]
+  mri_adni_data = mri_adni_data[,!idx_temp]
+  mri_adni_data[space] = rowMeans(temp_df)
+  
+}
+
+mri_areas_hemis_2 = mri_areas[grepl('L|R',mri_areas)]
+mri_areas_hemis_2 = unlist(lapply(mri_areas_hemis_2,function(x){return(strsplit(x,'L|R')[[1]][2])}))
+for(space in unique(mri_areas_hemis_2)){
+  
+  idx_temp = grepl(space,colnames(mri_adni_data),fixed=TRUE)
+  temp_df = mri_adni_data[,idx_temp]
+  mri_adni_data = mri_adni_data[,!idx_temp]
+  mri_adni_data[space] = rowMeans(temp_df)
+  
+}
+
+
+
+
+mri_areas = c(unique(mri_areas_hemis_2),unique(mri_areas_hemis))
+test_skewness(mri_adni_data$HippVol)
+test_skewness(mri_adni_data$entorhinal_thickness)
+
+test_skewness(sqrt(max(mri_adni_data$entorhinal_thickness + 1) - mri_adni_data$entorhinal_thickness))
+
+# https://www.datanovia.com/en/lessons/transform-data-to-normal-distribution-in-r/
+
+
+
+
+run_mri_association_final_formula_1 = function(mri_adni_data, mri_areas, formula_std = ' ~ delta_age + Actual_Age + PTGENDER + PTEDUCAT + ICV', reg=TRUE){
+  mri_adni_data$delta_age = mri_adni_data$Corrected_Predicted_Age - mri_adni_data$Actual_Age
+  
+  start = TRUE
+  for(k in mri_areas){
+    
+    temp = k
+    if(reg){
+      target_line = paste0(temp,formula_std)
+      
+    }else{
+      target_line = paste0(formula_std,temp)
+      
+    }
+    lin_fit = lm(as.formula(target_line),
+                 data = mri_adni_data)
+    
+    temp_p_vals = summary(lin_fit)$coefficients[,4]  
+    temp_coef_vals = summary(lin_fit)$coefficients[,1]  
+    temp_main_adj_r2 = summary(lin_fit)$adj.r.squared
+    
+    temp_df = data.frame('Gender_Var_Exp' = numeric(),
+                         # 'Corrected_Predicted_Age_Var_Exp' = numeric(),
+                         'AGE_Var_Exp' = numeric(),
+                         'delta_age_Var_Exp' = numeric(),
+                         'ICV_Var_Exp' = numeric(),
+                         #'BMI_BM_Var_Exp' = numeric(),
+                         'PTEDUCAT_Var_Exp' = numeric())
+    factors = c('PTGENDER','AGE',#'Corrected_Predicted_Age','BMI',
+                'delta_age',
+                'ICV','PTEDUCAT')
+    for(i in 1:length(colnames(temp_df))){
+      factors_temp = factors[-i]
+      target_line_temp = paste0(temp,' ~ ',paste(factors_temp,collapse = ' + '))
+      lin_fit_temp = lm(as.formula(target_line_temp),
+                        data = mri_adni_data)
+      temp_part_adj_r2 = summary(lin_fit_temp)$adj.r.squared
+      temp_df[1,i] = temp_main_adj_r2 - temp_part_adj_r2 
+      
+      
+    }
+    
+    
+    if(start){
+      MRI_ADNI_Association = data.frame(
+        # 'Predicted_Age' = as.numeric(temp_p_vals['Corrected_Predicted_Age']),
+        # 'Predicted_Age_Coef' = as.numeric(temp_coef_vals['Corrected_Predicted_Age']),
+        # 'Predicted_Age_Var_Exp' =as.numeric(temp_df['Corrected_Predicted_Age_Var_Exp']),
+        'Age' = as.numeric(temp_p_vals['AGE']),
+        'Age_Coef' = as.numeric(temp_coef_vals['AGE']),
+        'Age_Var_Exp' =as.numeric(temp_df['AGE_Var_Exp']),
+        'delta_age' = as.numeric(temp_p_vals['delta_age']),
+        'delta_age_Coef' = as.numeric(temp_coef_vals['delta_age']),
+        'delta_age_Var_Exp' =as.numeric(temp_df['delta_age_Var_Exp']),
+        'Gender' = as.numeric(temp_p_vals['PTGENDER2']),
+        'Gender_Coef' = as.numeric(temp_coef_vals['PTGENDER2']),
+        'Gender_Var_Exp' =as.numeric(temp_df['Gender_Var_Exp']),
+        'Education' = as.numeric(temp_p_vals['PTEDUCAT']),
+        'Education_Coef' = as.numeric(temp_coef_vals['PTEDUCAT']),
+        'Education_Var_Exp' =as.numeric(temp_df['PTEDUCAT_Var_Exp']),
+        'ICV' = as.numeric(temp_p_vals['ICV']),
+        'ICV_Coef' = as.numeric(temp_coef_vals['ICV']),
+        'ICV_Var_Exp' =as.numeric(temp_df['ICV_Var_Exp']),
+        # 'BMI' = as.numeric(temp_p_vals['BMI']),
+        # 'BMI_Coef' = as.numeric(temp_coef_vals['BMI']),
+        # 'BMI_Var_Exp' =as.numeric(temp_df['BMI_BM_Var_Exp']),
+        'Area_Name' = temp)
+      start = FALSE
+    }else{
+      MRI_ADNI_Association = rbind(MRI_ADNI_Association,data.frame(
+        # 'Predicted_Age' = as.numeric(temp_p_vals['Corrected_Predicted_Age']),
+        # 'Predicted_Age_Coef' = as.numeric(temp_coef_vals['Corrected_Predicted_Age']),
+        # 'Predicted_Age_Var_Exp' =as.numeric(temp_df['Corrected_Predicted_Age_Var_Exp']),
+        'Age' = as.numeric(temp_p_vals['AGE']),
+        'Age_Coef' = as.numeric(temp_coef_vals['AGE']),
+        'Age_Var_Exp' =as.numeric(temp_df['AGE_Var_Exp']),
+        'delta_age' = as.numeric(temp_p_vals['delta_age']),
+        'delta_age_Coef' = as.numeric(temp_coef_vals['delta_age']),
+        'delta_age_Var_Exp' =as.numeric(temp_df['delta_age_Var_Exp']),
+        'Gender' = as.numeric(temp_p_vals['PTGENDER2']),
+        'Gender_Coef' = as.numeric(temp_coef_vals['PTGENDER2']),
+        'Gender_Var_Exp' =as.numeric(temp_df['Gender_Var_Exp']),
+        'Education' = as.numeric(temp_p_vals['PTEDUCAT']),
+        'Education_Coef' = as.numeric(temp_coef_vals['PTEDUCAT']),
+        'Education_Var_Exp' =as.numeric(temp_df['PTEDUCAT_Var_Exp']),
+        'ICV' = as.numeric(temp_p_vals['ICV']),
+        'ICV_Coef' = as.numeric(temp_coef_vals['ICV']),
+        'ICV_Var_Exp' =as.numeric(temp_df['ICV_Var_Exp']),
+        # 'BMI' = as.numeric(temp_p_vals['BMI']),
+        # 'BMI_Coef' = as.numeric(temp_coef_vals['BMI']),
+        # 'BMI_Var_Exp' =as.numeric(temp_df['BMI_BM_Var_Exp']),
+        'Area_Name' = temp))
+    }
+  }
+  
+  rownames(MRI_ADNI_Association) = MRI_ADNI_Association$Area_Name
+  # MRI_ADNI_Association$Predicted_Age_FDR_p = p.adjust(MRI_ADNI_Association$Predicted_Age,method = 'fdr')
+  MRI_ADNI_Association$Age_FDR_p = p.adjust(MRI_ADNI_Association$Age,method = 'fdr')
+  # 
+  MRI_ADNI_Association$delta_age_FDR_p = p.adjust(MRI_ADNI_Association$delta_age,method = 'fdr')
+  MRI_ADNI_Association$Gende_FDR_pr = p.adjust(MRI_ADNI_Association$Gender,method = 'fdr')
+  MRI_ADNI_Association$Education_FDR_p = p.adjust(MRI_ADNI_Association$Education,method = 'fdr')
+  MRI_ADNI_Association$ICV_FDR_p = p.adjust(MRI_ADNI_Association$ICV,method = 'fdr')
+  # MRI_ADNI_Association$BMI_FDR_p = p.adjust(MRI_ADNI_Association$BMI,method = 'fdr')
+  
+  return(MRI_ADNI_Association)
+}
+run_mri_association_final_formula_2 = function(mri_adni_data, mri_areas, formula_std = ' ~ Corrected_Predicted_Age + Actual_Age + PTGENDER + PTEDUCAT + ICV', reg=TRUE){
+ # mri_adni_data$delta_age = mri_adni_data$Corrected_Predicted_Age - mri_adni_data$Actual_Age
+  
+  start = TRUE
+  for(k in mri_areas){
+    
+    temp = k
+    if(reg){
+      target_line = paste0(temp,formula_std)
+      
+    }else{
+      target_line = paste0(formula_std,temp)
+      
+    }
+    lin_fit = lm(as.formula(target_line),
+                 data = mri_adni_data)
+    
+    temp_p_vals = summary(lin_fit)$coefficients[,4]  
+    temp_coef_vals = summary(lin_fit)$coefficients[,1]  
+    temp_main_adj_r2 = summary(lin_fit)$adj.r.squared
+    
+    temp_df = data.frame('Gender_Var_Exp' = numeric(),
+                         'Corrected_Predicted_Age_Var_Exp' = numeric(),
+                         'AGE_Var_Exp' = numeric(),
+                         #'delta_age_Var_Exp' = numeric(),
+                         'ICV_Var_Exp' = numeric(),
+                         #'BMI_BM_Var_Exp' = numeric(),
+                         'PTEDUCAT_Var_Exp' = numeric())
+    factors = c('PTGENDER','AGE','Corrected_Predicted_Age',#'BMI',
+                #'delta_age',
+                'ICV','PTEDUCAT')
+    for(i in 1:length(colnames(temp_df))){
+      factors_temp = factors[-i]
+      target_line_temp = paste0(temp,' ~ ',paste(factors_temp,collapse = ' + '))
+      lin_fit_temp = lm(as.formula(target_line_temp),
+                        data = mri_adni_data)
+      temp_part_adj_r2 = summary(lin_fit_temp)$adj.r.squared
+      temp_df[1,i] = temp_main_adj_r2 - temp_part_adj_r2 
+      
+      
+    }
+    
+    
+    if(start){
+      MRI_ADNI_Association = data.frame(
+        'Predicted_Age' = as.numeric(temp_p_vals['Corrected_Predicted_Age']),
+        'Predicted_Age_Coef' = as.numeric(temp_coef_vals['Corrected_Predicted_Age']),
+        'Predicted_Age_Var_Exp' =as.numeric(temp_df['Corrected_Predicted_Age_Var_Exp']),
+        'Age' = as.numeric(temp_p_vals['AGE']),
+        'Age_Coef' = as.numeric(temp_coef_vals['AGE']),
+        'Age_Var_Exp' =as.numeric(temp_df['AGE_Var_Exp']),
+        # 'delta_age' = as.numeric(temp_p_vals['delta_age']),
+        # 'delta_age_Coef' = as.numeric(temp_coef_vals['delta_age']),
+        # 'delta_age_Var_Exp' =as.numeric(temp_df['delta_age_Var_Exp']),
+        'Gender' = as.numeric(temp_p_vals['PTGENDER2']),
+        'Gender_Coef' = as.numeric(temp_coef_vals['PTGENDER2']),
+        'Gender_Var_Exp' =as.numeric(temp_df['Gender_Var_Exp']),
+        'Education' = as.numeric(temp_p_vals['PTEDUCAT']),
+        'Education_Coef' = as.numeric(temp_coef_vals['PTEDUCAT']),
+        'Education_Var_Exp' =as.numeric(temp_df['PTEDUCAT_Var_Exp']),
+        'ICV' = as.numeric(temp_p_vals['ICV']),
+        'ICV_Coef' = as.numeric(temp_coef_vals['ICV']),
+        'ICV_Var_Exp' =as.numeric(temp_df['ICV_Var_Exp']),
+        # 'BMI' = as.numeric(temp_p_vals['BMI']),
+        # 'BMI_Coef' = as.numeric(temp_coef_vals['BMI']),
+        # 'BMI_Var_Exp' =as.numeric(temp_df['BMI_BM_Var_Exp']),
+        'Area_Name' = temp)
+      start = FALSE
+    }else{
+      MRI_ADNI_Association = rbind(MRI_ADNI_Association,data.frame(
+        'Predicted_Age' = as.numeric(temp_p_vals['Corrected_Predicted_Age']),
+        'Predicted_Age_Coef' = as.numeric(temp_coef_vals['Corrected_Predicted_Age']),
+        'Predicted_Age_Var_Exp' =as.numeric(temp_df['Corrected_Predicted_Age_Var_Exp']),
+        'Age' = as.numeric(temp_p_vals['AGE']),
+        'Age_Coef' = as.numeric(temp_coef_vals['AGE']),
+        'Age_Var_Exp' =as.numeric(temp_df['AGE_Var_Exp']),
+        # 'delta_age' = as.numeric(temp_p_vals['delta_age']),
+        # 'delta_age_Coef' = as.numeric(temp_coef_vals['delta_age']),
+        # 'delta_age_Var_Exp' =as.numeric(temp_df['delta_age_Var_Exp']),
+        'Gender' = as.numeric(temp_p_vals['PTGENDER2']),
+        'Gender_Coef' = as.numeric(temp_coef_vals['PTGENDER2']),
+        'Gender_Var_Exp' =as.numeric(temp_df['Gender_Var_Exp']),
+        'Education' = as.numeric(temp_p_vals['PTEDUCAT']),
+        'Education_Coef' = as.numeric(temp_coef_vals['PTEDUCAT']),
+        'Education_Var_Exp' =as.numeric(temp_df['PTEDUCAT_Var_Exp']),
+        'ICV' = as.numeric(temp_p_vals['ICV']),
+        'ICV_Coef' = as.numeric(temp_coef_vals['ICV']),
+        'ICV_Var_Exp' =as.numeric(temp_df['ICV_Var_Exp']),
+        # 'BMI' = as.numeric(temp_p_vals['BMI']),
+        # 'BMI_Coef' = as.numeric(temp_coef_vals['BMI']),
+        # 'BMI_Var_Exp' =as.numeric(temp_df['BMI_BM_Var_Exp']),
+        'Area_Name' = temp))
+    }
+  }
+  
+  rownames(MRI_ADNI_Association) = MRI_ADNI_Association$Area_Name
+  MRI_ADNI_Association$Predicted_Age_FDR_p = p.adjust(MRI_ADNI_Association$Predicted_Age,method = 'fdr')
+  MRI_ADNI_Association$Age_FDR_p = p.adjust(MRI_ADNI_Association$Age,method = 'fdr')
+  # 
+  # MRI_ADNI_Association$delta_age_FDR_p = p.adjust(MRI_ADNI_Association$delta_age,method = 'fdr')
+  MRI_ADNI_Association$Gende_FDR_pr = p.adjust(MRI_ADNI_Association$Gender,method = 'fdr')
+  MRI_ADNI_Association$Education_FDR_p = p.adjust(MRI_ADNI_Association$Education,method = 'fdr')
+  MRI_ADNI_Association$ICV_FDR_p = p.adjust(MRI_ADNI_Association$ICV,method = 'fdr')
+  # MRI_ADNI_Association$BMI_FDR_p = p.adjust(MRI_ADNI_Association$BMI,method = 'fdr')
+  
+  return(MRI_ADNI_Association)
+}
+run_mri_association_final_formula_1_w_apoe = function(mri_adni_data, mri_areas, formula_std = ' ~ delta_age + Actual_Age + PTGENDER + PTEDUCAT + ICV + APOE', reg=TRUE){
+  mri_adni_data$delta_age = mri_adni_data$Corrected_Predicted_Age - mri_adni_data$Actual_Age
+  mri_adni_data$entorhinal_thickness =   mri_adni_data$entorhinal_thickness
+  start = TRUE
+  for(k in mri_areas){
+    
+    temp = k
+    if(reg){
+      target_line = paste0(temp,formula_std)
+      
+    }else{
+      target_line = paste0(formula_std,temp)
+      
+    }
+
+    lin_fit = lm(as.formula(target_line),
+                 data = mri_adni_data)
+    
+    temp_p_vals = summary(lin_fit)$coefficients[,4]  
+    temp_coef_vals = summary(lin_fit)$coefficients[,1]  
+    temp_main_adj_r2 = summary(lin_fit)$adj.r.squared
+    
+    temp_df = data.frame('Gender_Var_Exp' = numeric(),
+                         # 'Corrected_Predicted_Age_Var_Exp' = numeric(),
+                         'AGE_Var_Exp' = numeric(),
+                         'delta_age_Var_Exp' = numeric(),
+                         'ICV_Var_Exp' = numeric(),
+                         #'BMI_BM_Var_Exp' = numeric(),
+                         'PTEDUCAT_Var_Exp' = numeric(),
+                         'APOE_Var_Exp' = numeric())
+    factors = c('PTGENDER','Actual_Age',#'Corrected_Predicted_Age','BMI',
+                'delta_age',
+                'ICV','PTEDUCAT','APOE')
+    for(i in 1:length(colnames(temp_df))){
+      factors_temp = factors[-i]
+      target_line_temp = paste0(temp,' ~ ',paste(factors_temp,collapse = ' + '))
+      lin_fit_temp = lm(as.formula(target_line_temp),
+                        data = mri_adni_data)
+      temp_part_adj_r2 = summary(lin_fit_temp)$adj.r.squared
+      temp_df[1,i] = temp_main_adj_r2 - temp_part_adj_r2 
+      
+      
+    }
+    
+    
+    if(start){
+      MRI_ADNI_Association = data.frame(
+        # 'Predicted_Age' = as.numeric(temp_p_vals['Corrected_Predicted_Age']),
+        # 'Predicted_Age_Coef' = as.numeric(temp_coef_vals['Corrected_Predicted_Age']),
+        # 'Predicted_Age_Var_Exp' =as.numeric(temp_df['Corrected_Predicted_Age_Var_Exp']),
+        'Age' = as.numeric(temp_p_vals['Actual_Age']),
+        'Age_Coef' = as.numeric(temp_coef_vals['Actual_Age']),
+        'Age_Var_Exp' =as.numeric(temp_df['AGE_Var_Exp']),
+        'delta_age' = as.numeric(temp_p_vals['delta_age']),
+        'delta_age_Coef' = as.numeric(temp_coef_vals['delta_age']),
+        'delta_age_Var_Exp' =as.numeric(temp_df['delta_age_Var_Exp']),
+        'Gender' = as.numeric(temp_p_vals['PTGENDER2']),
+        'Gender_Coef' = as.numeric(temp_coef_vals['PTGENDER2']),
+        'Gender_Var_Exp' =as.numeric(temp_df['Gender_Var_Exp']),
+        'Education' = as.numeric(temp_p_vals['PTEDUCAT']),
+        'Education_Coef' = as.numeric(temp_coef_vals['PTEDUCAT']),
+        'Education_Var_Exp' =as.numeric(temp_df['PTEDUCAT_Var_Exp']),
+        'ICV' = as.numeric(temp_p_vals['ICV']),
+        'ICV_Coef' = as.numeric(temp_coef_vals['ICV']),
+        'ICV_Var_Exp' =as.numeric(temp_df['ICV_Var_Exp']),
+        'APOE' = as.numeric(min(temp_p_vals[grep('APOE',names(temp_p_vals))])),
+        'APOE_Coef' = as.numeric(min(temp_coef_vals[grep('APOE',names(temp_p_vals))])),
+        'APOE_Var_Exp' =as.numeric(temp_df['APOE_Var_Exp']),
+        'Area_Name' = temp)
+      start = FALSE
+    }else{
+      MRI_ADNI_Association = rbind(MRI_ADNI_Association,data.frame(
+        # 'Predicted_Age' = as.numeric(temp_p_vals['Corrected_Predicted_Age']),
+        # 'Predicted_Age_Coef' = as.numeric(temp_coef_vals['Corrected_Predicted_Age']),
+        # 'Predicted_Age_Var_Exp' =as.numeric(temp_df['Corrected_Predicted_Age_Var_Exp']),
+        'Age' = as.numeric(temp_p_vals['Actual_Age']),
+        'Age_Coef' = as.numeric(temp_coef_vals['Actual_Age']),
+        'Age_Var_Exp' =as.numeric(temp_df['AGE_Var_Exp']),
+        'delta_age' = as.numeric(temp_p_vals['delta_age']),
+        'delta_age_Coef' = as.numeric(temp_coef_vals['delta_age']),
+        'delta_age_Var_Exp' =as.numeric(temp_df['delta_age_Var_Exp']),
+        'Gender' = as.numeric(temp_p_vals['PTGENDER2']),
+        'Gender_Coef' = as.numeric(temp_coef_vals['PTGENDER2']),
+        'Gender_Var_Exp' =as.numeric(temp_df['Gender_Var_Exp']),
+        'Education' = as.numeric(temp_p_vals['PTEDUCAT']),
+        'Education_Coef' = as.numeric(temp_coef_vals['PTEDUCAT']),
+        'Education_Var_Exp' =as.numeric(temp_df['PTEDUCAT_Var_Exp']),
+        'ICV' = as.numeric(temp_p_vals['ICV']),
+        'ICV_Coef' = as.numeric(temp_coef_vals['ICV']),
+        'ICV_Var_Exp' =as.numeric(temp_df['ICV_Var_Exp']),
+        'APOE' = as.numeric(min(temp_p_vals[grep('APOE',names(temp_p_vals))])),
+        'APOE_Coef' = as.numeric(min(temp_coef_vals[grep('APOE',names(temp_p_vals))])),
+        'APOE_Var_Exp' =as.numeric(temp_df['APOE_Var_Exp']),
+        'Area_Name' = temp))
+    }
+  }
+  
+  rownames(MRI_ADNI_Association) = MRI_ADNI_Association$Area_Name
+  # MRI_ADNI_Association$Predicted_Age_FDR_p = p.adjust(MRI_ADNI_Association$Predicted_Age,method = 'fdr')
+  MRI_ADNI_Association$Age_FDR_p = p.adjust(MRI_ADNI_Association$Age,method = 'fdr')
+  # 
+  MRI_ADNI_Association$delta_age_FDR_p = p.adjust(MRI_ADNI_Association$delta_age,method = 'fdr')
+  MRI_ADNI_Association$Gende_FDR_pr = p.adjust(MRI_ADNI_Association$Gender,method = 'fdr')
+  MRI_ADNI_Association$Education_FDR_p = p.adjust(MRI_ADNI_Association$Education,method = 'fdr')
+  MRI_ADNI_Association$ICV_FDR_p = p.adjust(MRI_ADNI_Association$ICV,method = 'fdr')
+  MRI_ADNI_Association$APOE_FDR_p = p.adjust(MRI_ADNI_Association$APOE,method = 'fdr')
+  
+  return(MRI_ADNI_Association)
+}
+#run_mri_association_final_formula_2_w_apoe = function(mri_adni_data, mri_areas, formula_std = ' ~ Corrected_Predicted_Age + Actual_Age + PTGENDER + PTEDUCAT + ICV + APOE', reg=TRUE){
+  # mri_adni_data$delta_age = mri_adni_data$Corrected_Predicted_Age - mri_adni_data$Actual_Age
+  
+  start = TRUE
+  for(k in mri_areas){
+    
+    temp = k
+    if(reg){
+      target_line = paste0(temp,formula_std)
+      
+    }else{
+      target_line = paste0(formula_std,temp)
+      
+    }
+    lin_fit = lm(as.formula(target_line),
+                 data = mri_adni_data)
+    
+    temp_p_vals = summary(lin_fit)$coefficients[,4]  
+    temp_coef_vals = summary(lin_fit)$coefficients[,1]  
+    temp_main_adj_r2 = summary(lin_fit)$adj.r.squared
+    
+    temp_df = data.frame('Gender_Var_Exp' = numeric(),
+                         'Corrected_Predicted_Age_Var_Exp' = numeric(),
+                         'AGE_Var_Exp' = numeric(),
+                         #'delta_age_Var_Exp' = numeric(),
+                         'ICV_Var_Exp' = numeric(),
+                         #'BMI_BM_Var_Exp' = numeric(),
+                         'PTEDUCAT_Var_Exp' = numeric(),
+                         'APOE_Var_Exp' = numeric())
+    factors = c('PTGENDER','AGE','Corrected_Predicted_Age',#'BMI',
+                #'delta_age',
+                'ICV','PTEDUCAT','APOE')
+    for(i in 1:length(colnames(temp_df))){
+      factors_temp = factors[-i]
+      target_line_temp = paste0(temp,' ~ ',paste(factors_temp,collapse = ' + '))
+      lin_fit_temp = lm(as.formula(target_line_temp),
+                        data = mri_adni_data)
+      temp_part_adj_r2 = summary(lin_fit_temp)$adj.r.squared
+      temp_df[1,i] = temp_main_adj_r2 - temp_part_adj_r2 
+      
+      
+    }
+    
+    
+    if(start){
+      MRI_ADNI_Association = data.frame(
+        'Predicted_Age' = as.numeric(temp_p_vals['Corrected_Predicted_Age']),
+        'Predicted_Age_Coef' = as.numeric(temp_coef_vals['Corrected_Predicted_Age']),
+        'Predicted_Age_Var_Exp' =as.numeric(temp_df['Corrected_Predicted_Age_Var_Exp']),
+        'Age' = as.numeric(temp_p_vals['AGE']),
+        'Age_Coef' = as.numeric(temp_coef_vals['AGE']),
+        'Age_Var_Exp' =as.numeric(temp_df['AGE_Var_Exp']),
+        # 'delta_age' = as.numeric(temp_p_vals['delta_age']),
+        # 'delta_age_Coef' = as.numeric(temp_coef_vals['delta_age']),
+        # 'delta_age_Var_Exp' =as.numeric(temp_df['delta_age_Var_Exp']),
+        'Gender' = as.numeric(temp_p_vals['PTGENDER2']),
+        'Gender_Coef' = as.numeric(temp_coef_vals['PTGENDER2']),
+        'Gender_Var_Exp' =as.numeric(temp_df['Gender_Var_Exp']),
+        'Education' = as.numeric(temp_p_vals['PTEDUCAT']),
+        'Education_Coef' = as.numeric(temp_coef_vals['PTEDUCAT']),
+        'Education_Var_Exp' =as.numeric(temp_df['PTEDUCAT_Var_Exp']),
+        'ICV' = as.numeric(temp_p_vals['ICV']),
+        'ICV_Coef' = as.numeric(temp_coef_vals['ICV']),
+        'ICV_Var_Exp' =as.numeric(temp_df['ICV_Var_Exp']),
+        'APOE' = as.numeric(min(temp_p_vals[grep('APOE',names(temp_p_vals))])),
+        'APOE_Coef' = as.numeric(min(temp_coef_vals[grep('APOE',names(temp_p_vals))])),
+        'APOE_Var_Exp' =as.numeric(temp_df['APOE_Var_Exp']),
+        'Area_Name' = temp)
+      start = FALSE
+    }else{
+      MRI_ADNI_Association = rbind(MRI_ADNI_Association,data.frame(
+        'Predicted_Age' = as.numeric(temp_p_vals['Corrected_Predicted_Age']),
+        'Predicted_Age_Coef' = as.numeric(temp_coef_vals['Corrected_Predicted_Age']),
+        'Predicted_Age_Var_Exp' =as.numeric(temp_df['Corrected_Predicted_Age_Var_Exp']),
+        'Age' = as.numeric(temp_p_vals['AGE']),
+        'Age_Coef' = as.numeric(temp_coef_vals['AGE']),
+        'Age_Var_Exp' =as.numeric(temp_df['AGE_Var_Exp']),
+        # 'delta_age' = as.numeric(temp_p_vals['delta_age']),
+        # 'delta_age_Coef' = as.numeric(temp_coef_vals['delta_age']),
+        # 'delta_age_Var_Exp' =as.numeric(temp_df['delta_age_Var_Exp']),
+        'Gender' = as.numeric(temp_p_vals['PTGENDER2']),
+        'Gender_Coef' = as.numeric(temp_coef_vals['PTGENDER2']),
+        'Gender_Var_Exp' =as.numeric(temp_df['Gender_Var_Exp']),
+        'Education' = as.numeric(temp_p_vals['PTEDUCAT']),
+        'Education_Coef' = as.numeric(temp_coef_vals['PTEDUCAT']),
+        'Education_Var_Exp' =as.numeric(temp_df['PTEDUCAT_Var_Exp']),
+        'ICV' = as.numeric(temp_p_vals['ICV']),
+        'ICV_Coef' = as.numeric(temp_coef_vals['ICV']),
+        'ICV_Var_Exp' =as.numeric(temp_df['ICV_Var_Exp']),
+        'APOE' = as.numeric(min(temp_p_vals[grep('APOE',names(temp_p_vals))])),
+        'APOE_Coef' = as.numeric(min(temp_coef_vals[grep('APOE',names(temp_p_vals))])),
+        'APOE_Var_Exp' =as.numeric(temp_df['APOE_Var_Exp']),
+        'Area_Name' = temp))
+    }
+  }
+  
+  rownames(MRI_ADNI_Association) = MRI_ADNI_Association$Area_Name
+  MRI_ADNI_Association$Predicted_Age_FDR_p = p.adjust(MRI_ADNI_Association$Predicted_Age,method = 'fdr')
+  MRI_ADNI_Association$Age_FDR_p = p.adjust(MRI_ADNI_Association$Age,method = 'fdr')
+  # 
+  # MRI_ADNI_Association$delta_age_FDR_p = p.adjust(MRI_ADNI_Association$delta_age,method = 'fdr')
+  MRI_ADNI_Association$Gende_FDR_pr = p.adjust(MRI_ADNI_Association$Gender,method = 'fdr')
+  MRI_ADNI_Association$Education_FDR_p = p.adjust(MRI_ADNI_Association$Education,method = 'fdr')
+  MRI_ADNI_Association$ICV_FDR_p = p.adjust(MRI_ADNI_Association$ICV,method = 'fdr')
+  MRI_ADNI_Association$APOE_FDR_p = p.adjust(MRI_ADNI_Association$APOE,method = 'fdr')
+  
+  return(MRI_ADNI_Association)
+}
+
+#run_mri_association_final_formula_T_w_apoe = function(mri_adni_data_bl,mri_adni_data_m12, mri_areas, formula_std = ' ~ delta_age + Actual_Age + PTGENDER + PTEDUCAT + ICV + APOE', reg=TRUE){
+  mri_adni_data_bl$delta_age = mri_adni_data_bl$Corrected_Predicted_Age - mri_adni_data_bl$Actual_Age
+  subj_to_consider = mri_adni_data_bl$RID[which(mri_adni_data_bl$RID %in% mri_adni_data_m12$RID)]
+  mri_adni_data = mri_adni_data_m12[which(mri_adni_data_m12$RID %in% subj_to_consider),]
+  mri_adni_data$delta_age = mri_adni_data_bl$Corrected_Predicted_Age[which(mri_adni_data_bl$RID %in% subj_to_consider)] - mri_adni_data_bl$Actual_Age[which(mri_adni_data_bl$RID %in% subj_to_consider)]
+  start = TRUE
+  for(k in mri_areas){
+    
+    temp = k
+    if(reg){
+      target_line = paste0(temp,formula_std)
+      
+    }else{
+      target_line = paste0(formula_std,temp)
+      
+    }
+    lin_fit = lm(as.formula(target_line),
+                 data = mri_adni_data)
+    
+    temp_p_vals = summary(lin_fit)$coefficients[,4]  
+    temp_coef_vals = summary(lin_fit)$coefficients[,1]  
+    temp_main_adj_r2 = summary(lin_fit)$adj.r.squared
+    
+    temp_df = data.frame('Gender_Var_Exp' = numeric(),
+                         # 'Corrected_Predicted_Age_Var_Exp' = numeric(),
+                         'AGE_Var_Exp' = numeric(),
+                         'delta_age_Var_Exp' = numeric(),
+                         'ICV_Var_Exp' = numeric(),
+                         #'BMI_BM_Var_Exp' = numeric(),
+                         'PTEDUCAT_Var_Exp' = numeric(),
+                         'APOE_Var_Exp' = numeric())
+    factors = c('PTGENDER','AGE',#'Corrected_Predicted_Age','BMI',
+                'delta_age',
+                'ICV','PTEDUCAT','APOE')
+    for(i in 1:length(colnames(temp_df))){
+      factors_temp = factors[-i]
+      target_line_temp = paste0(temp,' ~ ',paste(factors_temp,collapse = ' + '))
+      lin_fit_temp = lm(as.formula(target_line_temp),
+                        data = mri_adni_data)
+      temp_part_adj_r2 = summary(lin_fit_temp)$adj.r.squared
+      temp_df[1,i] = temp_main_adj_r2 - temp_part_adj_r2 
+      
+      
+    }
+    
+    
+    if(start){
+      MRI_ADNI_Association = data.frame(
+        # 'Predicted_Age' = as.numeric(temp_p_vals['Corrected_Predicted_Age']),
+        # 'Predicted_Age_Coef' = as.numeric(temp_coef_vals['Corrected_Predicted_Age']),
+        # 'Predicted_Age_Var_Exp' =as.numeric(temp_df['Corrected_Predicted_Age_Var_Exp']),
+        'Age' = as.numeric(temp_p_vals['AGE']),
+        'Age_Coef' = as.numeric(temp_coef_vals['AGE']),
+        'Age_Var_Exp' =as.numeric(temp_df['AGE_Var_Exp']),
+        'delta_age' = as.numeric(temp_p_vals['delta_age']),
+        'delta_age_Coef' = as.numeric(temp_coef_vals['delta_age']),
+        'delta_age_Var_Exp' =as.numeric(temp_df['delta_age_Var_Exp']),
+        'Gender' = as.numeric(temp_p_vals['PTGENDER']),
+        'Gender_Coef' = as.numeric(temp_coef_vals['PTGENDER']),
+        'Gender_Var_Exp' =as.numeric(temp_df['Gender_Var_Exp']),
+        'Education' = as.numeric(temp_p_vals['PTEDUCAT']),
+        'Education_Coef' = as.numeric(temp_coef_vals['PTEDUCAT']),
+        'Education_Var_Exp' =as.numeric(temp_df['PTEDUCAT_Var_Exp']),
+        'ICV' = as.numeric(temp_p_vals['ICV']),
+        'ICV_Coef' = as.numeric(temp_coef_vals['ICV']),
+        'ICV_Var_Exp' =as.numeric(temp_df['ICV_Var_Exp']),
+        'APOE' = as.numeric(min(temp_p_vals[grep('APOE',names(temp_p_vals))])),
+        'APOE_Coef' = as.numeric(min(temp_coef_vals[grep('APOE',names(temp_p_vals))])),
+        'APOE_Var_Exp' =as.numeric(temp_df['APOE_Var_Exp']),
+        'Area_Name' = temp)
+      start = FALSE
+    }else{
+      MRI_ADNI_Association = rbind(MRI_ADNI_Association,data.frame(
+        # 'Predicted_Age' = as.numeric(temp_p_vals['Corrected_Predicted_Age']),
+        # 'Predicted_Age_Coef' = as.numeric(temp_coef_vals['Corrected_Predicted_Age']),
+        # 'Predicted_Age_Var_Exp' =as.numeric(temp_df['Corrected_Predicted_Age_Var_Exp']),
+        'Age' = as.numeric(temp_p_vals['AGE']),
+        'Age_Coef' = as.numeric(temp_coef_vals['AGE']),
+        'Age_Var_Exp' =as.numeric(temp_df['AGE_Var_Exp']),
+        'delta_age' = as.numeric(temp_p_vals['delta_age']),
+        'delta_age_Coef' = as.numeric(temp_coef_vals['delta_age']),
+        'delta_age_Var_Exp' =as.numeric(temp_df['delta_age_Var_Exp']),
+        'Gender' = as.numeric(temp_p_vals['PTGENDER2']),
+        'Gender_Coef' = as.numeric(temp_coef_vals['PTGENDER2']),
+        'Gender_Var_Exp' =as.numeric(temp_df['Gender_Var_Exp']),
+        'Education' = as.numeric(temp_p_vals['PTEDUCAT']),
+        'Education_Coef' = as.numeric(temp_coef_vals['PTEDUCAT']),
+        'Education_Var_Exp' =as.numeric(temp_df['PTEDUCAT_Var_Exp']),
+        'ICV' = as.numeric(temp_p_vals['ICV']),
+        'ICV_Coef' = as.numeric(temp_coef_vals['ICV']),
+        'ICV_Var_Exp' =as.numeric(temp_df['ICV_Var_Exp']),
+        'APOE' = as.numeric(min(temp_p_vals[grep('APOE',names(temp_p_vals))])),
+        'APOE_Coef' = as.numeric(min(temp_coef_vals[grep('APOE',names(temp_p_vals))])),
+        'APOE_Var_Exp' =as.numeric(temp_df['APOE_Var_Exp']),
+        'Area_Name' = temp))
+    }
+  }
+  
+  rownames(MRI_ADNI_Association) = MRI_ADNI_Association$Area_Name
+  # MRI_ADNI_Association$Predicted_Age_FDR_p = p.adjust(MRI_ADNI_Association$Predicted_Age,method = 'fdr')
+  MRI_ADNI_Association$Age_FDR_p = p.adjust(MRI_ADNI_Association$Age,method = 'fdr')
+  # 
+  MRI_ADNI_Association$delta_age_FDR_p = p.adjust(MRI_ADNI_Association$delta_age,method = 'fdr')
+  MRI_ADNI_Association$Gende_FDR_pr = p.adjust(MRI_ADNI_Association$Gender,method = 'fdr')
+  MRI_ADNI_Association$Education_FDR_p = p.adjust(MRI_ADNI_Association$Education,method = 'fdr')
+  MRI_ADNI_Association$ICV_FDR_p = p.adjust(MRI_ADNI_Association$ICV,method = 'fdr')
+  MRI_ADNI_Association$APOE_FDR_p = p.adjust(MRI_ADNI_Association$APOE,method = 'fdr')
+  
+  return(MRI_ADNI_Association)
+}
+
+
+mri_adni_data_bl = mri_adni_data %>% filter(VISCODE2 == 'bl')
+mri_adni_data_m12 = mri_adni_data %>% filter(VISCODE2 == 'm12')
+mri_adni_data_m24 = mri_adni_data %>% filter(VISCODE2 == 'm24')
+
+
+# MRI_ADNI_Association_f1_bl = run_mri_association_final_formula_1(mri_adni_data = mri_adni_data_bl, mri_areas = areas_from_paper)
+# MRI_ADNI_Association_f1_m12 = run_mri_association_final_formula_1(mri_adni_data = mri_adni_data_m12, mri_areas = areas_from_paper)
+# MRI_ADNI_Association_f1_m24 = run_mri_association_final_formula_1(mri_adni_data = mri_adni_data_m24, mri_areas = areas_from_paper)
+# MRI_ADNI_Association_f2_bl = run_mri_association_final_formula_2(mri_adni_data = mri_adni_data_bl, mri_areas = areas_from_paper)
+# MRI_ADNI_Association_f2_m12 = run_mri_association_final_formula_2(mri_adni_data = mri_adni_data_m12, mri_areas = areas_from_paper)
+# MRI_ADNI_Association_f2_m24 = run_mri_association_final_formula_2(mri_adni_data = mri_adni_data_m24, mri_areas = areas_from_paper)
+MRI_ADNI_Association_f1_bl_w_apoe = run_mri_association_final_formula_1_w_apoe(mri_adni_data = mri_adni_data_bl, mri_areas = areas_from_paper)
+MRI_ADNI_Association_f1_m12_w_apoe = run_mri_association_final_formula_1_w_apoe(mri_adni_data = mri_adni_data_m12, mri_areas = areas_from_paper)
+MRI_ADNI_Association_f1_m24_w_apoe = run_mri_association_final_formula_1_w_apoe(mri_adni_data = mri_adni_data_m24, mri_areas = areas_from_paper)
+# MRI_ADNI_Association_f2_bl_w_apoe = run_mri_association_final_formula_2_w_apoe(mri_adni_data = mri_adni_data_bl, mri_areas = areas_from_paper)
+# MRI_ADNI_Association_f2_m12_w_apoe = run_mri_association_final_formula_2_w_apoe(mri_adni_data = mri_adni_data_m12, mri_areas = areas_from_paper)
+# MRI_ADNI_Association_f2_m24_w_apoe = run_mri_association_final_formula_2_w_apoe(mri_adni_data = mri_adni_data_m24, mri_areas = areas_from_paper)
+
+# MRI_ADNI_Association_T_bl_m12_w_apoe = run_mri_association_final_formula_T_w_apoe(mri_adni_data_bl = mri_adni_data_bl,mri_adni_data_m12 = mri_adni_data_m12, mri_areas = areas_from_paper)
+# MRI_ADNI_Association_T_bl_m24_w_apoe = run_mri_association_final_formula_T_w_apoe(mri_adni_data_bl = mri_adni_data_bl,mri_adni_data_m12 = mri_adni_data_m24, mri_areas = areas_from_paper)
+# 
+# MRI_ADNI_Association_f1_bl$timepoint = 'BL'
+# MRI_ADNI_Association_f1_m12$timepoint = 'M12'
+# MRI_ADNI_Association_f1_m24$timepoint = 'M24'
+# MRI_ADNI_Association_f1 = rbind(MRI_ADNI_Association_f1_bl,MRI_ADNI_Association_f1_m12,MRI_ADNI_Association_f1_m24)
+# write.csv(MRI_ADNI_Association_f1,paste0(name_file_starter,'Whole_Population_MRI_ADNI_Association_f1.csv'),quote = F, row.names = F)
+
+# write.csv(MRI_ADNI_Association_f1_bl,paste0(name_file_starter,'Whole_Population_MRI_ADNI_Association_f1_bl.csv'),quote = F, row.names = F)
+# write.csv(MRI_ADNI_Association_f1_m12,paste0(name_file_starter,'Whole_Population_MRI_ADNI_Association_f1_m12.csv'),quote = F, row.names = F)
+# write.csv(MRI_ADNI_Association_f1_m24,paste0(name_file_starter,'Whole_Population_MRI_ADNI_Association_f1_m24.csv'),quote = F, row.names = F)
+
+# MRI_ADNI_Association_f2_bl$timepoint = 'BL'
+# MRI_ADNI_Association_f2_m12$timepoint = 'M12'
+# MRI_ADNI_Association_f2_m24$timepoint = 'M24'
+# MRI_ADNI_Association_f2 = rbind(MRI_ADNI_Association_f2_bl,MRI_ADNI_Association_f2_m12,MRI_ADNI_Association_f2_m24)
+# write.csv(MRI_ADNI_Association_f2,paste0(name_file_starter,'Whole_Population_MRI_ADNI_Association_f2.csv'),quote = F, row.names = F)
+
+# write.csv(MRI_ADNI_Association_f2_bl,paste0(name_file_starter,'Whole_Population_MRI_ADNI_Association_f2_bl.csv'),quote = F, row.names = F)
+# write.csv(MRI_ADNI_Association_f2_m12,paste0(name_file_starter,'Whole_Population_MRI_ADNI_Association_f2_m12.csv'),quote = F, row.names = F)
+# write.csv(MRI_ADNI_Association_f2_m24,paste0(name_file_starter,'Whole_Population_MRI_ADNI_Association_f2_m24.csv'),quote = F, row.names = F)
+
+MRI_ADNI_Association_f1_bl_w_apoe$timepoint = 'BL'
+MRI_ADNI_Association_f1_m12_w_apoe$timepoint = 'M12'
+MRI_ADNI_Association_f1_m24_w_apoe$timepoint = 'M24'
+MRI_ADNI_Association_f1_w_apoe = rbind(MRI_ADNI_Association_f1_bl_w_apoe,MRI_ADNI_Association_f1_m12_w_apoe,MRI_ADNI_Association_f1_m24_w_apoe)
+write.csv(MRI_ADNI_Association_f1_w_apoe,paste0(name_file_starter,'Whole_Population_MRI_ADNI_Association_f1_w_apoe.csv'),quote = F, row.names = F)
+
+# write.csv(MRI_ADNI_Association_f1_bl_w_apoe,paste0(name_file_starter,'Whole_Population_MRI_ADNI_Association_f1_bl_w_APOE.csv'),quote = F, row.names = F)
+# write.csv(MRI_ADNI_Association_f1_m12_w_apoe,paste0(name_file_starter,'Whole_Population_MRI_ADNI_Association_f1_m12_w_APOE.csv'),quote = F, row.names = F)
+# write.csv(MRI_ADNI_Association_f1_m24_w_apoe,paste0(name_file_starter,'Whole_Population_MRI_ADNI_Association_f1_m24_w_APOE.csv'),quote = F, row.names = F)
+# 
+# MRI_ADNI_Association_f2_bl_w_apoe$timepoint = 'BL'
+# MRI_ADNI_Association_f2_m12_w_apoe$timepoint = 'M12'
+# MRI_ADNI_Association_f2_m24_w_apoe$timepoint = 'M24'
+# MRI_ADNI_Association_f2_w_apoe = rbind(MRI_ADNI_Association_f2_bl_w_apoe,MRI_ADNI_Association_f2_m12_w_apoe,MRI_ADNI_Association_f2_m24_w_apoe)
+# write.csv(MRI_ADNI_Association_f2_w_apoe,paste0(name_file_starter,'Whole_Population_MRI_ADNI_Association_f2_w_apoe.csv'),quote = F, row.names = F)
+
+# Not running amyloid due to really low significance
+
+# Amyloid -----------------------------------------------------------------
+# 
+# run_amyloid_association_final_formula_1 = function(amyloid_adni_data, amyloid_areas, formula_std = ' ~ delta_age + AGE + PTGENDER', reg=TRUE){
+#   amyloid_adni_data$delta_age = amyloid_adni_data$Corrected_Predicted_Age - amyloid_adni_data$Actual_Age
+#   
+#   start = TRUE
+#   for(k in amyloid_areas){
+#     
+#     temp = k
+#     if(reg){
+#       target_line = paste0(temp,formula_std)
+#       
+#     }else{
+#       target_line = paste0(formula_std,temp)
+#       
+#     }
+#     lin_fit = lm(as.formula(target_line),
+#                  data = amyloid_adni_data)
+#     
+#     temp_p_vals = summary(lin_fit)$coefficients[,4]  
+#     temp_coef_vals = summary(lin_fit)$coefficients[,1]  
+#     temp_main_adj_r2 = summary(lin_fit)$adj.r.squared
+#     
+#     temp_df = data.frame('Gender_Var_Exp' = numeric(),
+#                          # 'Corrected_Predicted_Age_Var_Exp' = numeric(),
+#                          'AGE_Var_Exp' = numeric(),
+#                          'delta_age_Var_Exp' = numeric())
+#     factors = c('PTGENDER','AGE',#'Corrected_Predicted_Age','BMI',
+#                 'delta_age')
+#     for(i in 1:length(colnames(temp_df))){
+#       factors_temp = factors[-i]
+#       target_line_temp = paste0(temp,' ~ ',paste(factors_temp,collapse = ' + '))
+#       lin_fit_temp = lm(as.formula(target_line_temp),
+#                         data = amyloid_adni_data)
+#       temp_part_adj_r2 = summary(lin_fit_temp)$adj.r.squared
+#       temp_df[1,i] = temp_main_adj_r2 - temp_part_adj_r2 
+#       
+#       
+#     }
+#     
+#     
+#     if(start){
+#       Amyloid_ADNI_Association = data.frame(
+#         # 'Predicted_Age' = as.numeric(temp_p_vals['Corrected_Predicted_Age']),
+#         # 'Predicted_Age_Coef' = as.numeric(temp_coef_vals['Corrected_Predicted_Age']),
+#         # 'Predicted_Age_Var_Exp' =as.numeric(temp_df['Corrected_Predicted_Age_Var_Exp']),
+#         'Age' = as.numeric(temp_p_vals['AGE']),
+#         'Age_Coef' = as.numeric(temp_coef_vals['AGE']),
+#         'Age_Var_Exp' =as.numeric(temp_df['AGE_Var_Exp']),
+#         'delta_age' = as.numeric(temp_p_vals['delta_age']),
+#         'delta_age_Coef' = as.numeric(temp_coef_vals['delta_age']),
+#         'delta_age_Var_Exp' =as.numeric(temp_df['delta_age_Var_Exp']),
+#         'Gender' = as.numeric(temp_p_vals['PTGENDER2']),
+#         'Gender_Coef' = as.numeric(temp_coef_vals['PTGENDER2']),
+#         'Gender_Var_Exp' =as.numeric(temp_df['Gender_Var_Exp']),
+#         'Area_Name' = temp)
+#       start = FALSE
+#     }else{
+#       Amyloid_ADNI_Association = rbind(Amyloid_ADNI_Association,data.frame(
+#         # 'Predicted_Age' = as.numeric(temp_p_vals['Corrected_Predicted_Age']),
+#         # 'Predicted_Age_Coef' = as.numeric(temp_coef_vals['Corrected_Predicted_Age']),
+#         # 'Predicted_Age_Var_Exp' =as.numeric(temp_df['Corrected_Predicted_Age_Var_Exp']),
+#         'Age' = as.numeric(temp_p_vals['AGE']),
+#         'Age_Coef' = as.numeric(temp_coef_vals['AGE']),
+#         'Age_Var_Exp' =as.numeric(temp_df['AGE_Var_Exp']),
+#         'delta_age' = as.numeric(temp_p_vals['delta_age']),
+#         'delta_age_Coef' = as.numeric(temp_coef_vals['delta_age']),
+#         'delta_age_Var_Exp' =as.numeric(temp_df['delta_age_Var_Exp']),
+#         'Gender' = as.numeric(temp_p_vals['PTGENDER2']),
+#         'Gender_Coef' = as.numeric(temp_coef_vals['PTGENDER2']),
+#         'Gender_Var_Exp' =as.numeric(temp_df['Gender_Var_Exp']),
+#         'Area_Name' = temp))
+#     }
+#   }
+#   
+#   rownames(Amyloid_ADNI_Association) = Amyloid_ADNI_Association$Area_Name
+#   Amyloid_ADNI_Association$Age_FDR_p = p.adjust(Amyloid_ADNI_Association$Age,method = 'fdr')
+#   # 
+#   Amyloid_ADNI_Association$delta_age_FDR_p = p.adjust(Amyloid_ADNI_Association$delta_age,method = 'fdr')
+#   Amyloid_ADNI_Association$Gender_FDR_pr = p.adjust(Amyloid_ADNI_Association$Gender,method = 'fdr')
+#   return(Amyloid_ADNI_Association)
+# }
+# run_amyloid_association_final_formula_1_w_apoe = function(amyloid_adni_data, amyloid_areas, formula_std = ' ~ delta_age + AGE + PTGENDER + APOE', reg=TRUE){
+#   amyloid_adni_data$delta_age = amyloid_adni_data$Corrected_Predicted_Age - amyloid_adni_data$Actual_Age
+#   
+#   start = TRUE
+#   for(k in amyloid_areas){
+#     
+#     temp = k
+#     if(reg){
+#       target_line = paste0(temp,formula_std)
+#       
+#     }else{
+#       target_line = paste0(formula_std,temp)
+#       
+#     }
+#     lin_fit = lm(as.formula(target_line),
+#                  data = amyloid_adni_data)
+#     
+#     temp_p_vals = summary(lin_fit)$coefficients[,4]  
+#     temp_coef_vals = summary(lin_fit)$coefficients[,1]  
+#     temp_main_adj_r2 = summary(lin_fit)$adj.r.squared
+#     
+#     temp_df = data.frame('Gender_Var_Exp' = numeric(),
+#                          # 'Corrected_Predicted_Age_Var_Exp' = numeric(),
+#                          'AGE_Var_Exp' = numeric(),
+#                          'delta_age_Var_Exp' = numeric(),
+#                          'APOE_Var_Exp' = numeric())
+#     factors = c('PTGENDER','AGE',#'Corrected_Predicted_Age','BMI',
+#                 'delta_age','APOE')
+#     for(i in 1:length(colnames(temp_df))){
+#       factors_temp = factors[-i]
+#       target_line_temp = paste0(temp,' ~ ',paste(factors_temp,collapse = ' + '))
+#       lin_fit_temp = lm(as.formula(target_line_temp),
+#                         data = amyloid_adni_data)
+#       temp_part_adj_r2 = summary(lin_fit_temp)$adj.r.squared
+#       temp_df[1,i] = temp_main_adj_r2 - temp_part_adj_r2 
+#       
+#       
+#     }
+#     
+#     
+#     if(start){
+#       Amyloid_ADNI_Association = data.frame(
+#         # 'Predicted_Age' = as.numeric(temp_p_vals['Corrected_Predicted_Age']),
+#         # 'Predicted_Age_Coef' = as.numeric(temp_coef_vals['Corrected_Predicted_Age']),
+#         # 'Predicted_Age_Var_Exp' =as.numeric(temp_df['Corrected_Predicted_Age_Var_Exp']),
+#         'Age' = as.numeric(temp_p_vals['AGE']),
+#         'Age_Coef' = as.numeric(temp_coef_vals['AGE']),
+#         'Age_Var_Exp' =as.numeric(temp_df['AGE_Var_Exp']),
+#         'delta_age' = as.numeric(temp_p_vals['delta_age']),
+#         'delta_age_Coef' = as.numeric(temp_coef_vals['delta_age']),
+#         'delta_age_Var_Exp' =as.numeric(temp_df['delta_age_Var_Exp']),
+#         'Gender' = as.numeric(temp_p_vals['PTGENDER2']),
+#         'Gender_Coef' = as.numeric(temp_coef_vals['PTGENDER2']),
+#         'Gender_Var_Exp' =as.numeric(temp_df['Gender_Var_Exp']),
+#         'APOE' = as.numeric(min(temp_p_vals[grep('APOE',names(temp_p_vals))])),
+#         'APOE_Coef' = as.numeric(min(temp_coef_vals[grep('APOE',names(temp_p_vals))])),
+#         'APOE_Var_Exp' =as.numeric(temp_df['APOE_Var_Exp']),
+#         'Area_Name' = temp)
+#       start = FALSE
+#     }else{
+#       Amyloid_ADNI_Association = rbind(Amyloid_ADNI_Association,data.frame(
+#         # 'Predicted_Age' = as.numeric(temp_p_vals['Corrected_Predicted_Age']),
+#         # 'Predicted_Age_Coef' = as.numeric(temp_coef_vals['Corrected_Predicted_Age']),
+#         # 'Predicted_Age_Var_Exp' =as.numeric(temp_df['Corrected_Predicted_Age_Var_Exp']),
+#         'Age' = as.numeric(temp_p_vals['AGE']),
+#         'Age_Coef' = as.numeric(temp_coef_vals['AGE']),
+#         'Age_Var_Exp' =as.numeric(temp_df['AGE_Var_Exp']),
+#         'delta_age' = as.numeric(temp_p_vals['delta_age']),
+#         'delta_age_Coef' = as.numeric(temp_coef_vals['delta_age']),
+#         'delta_age_Var_Exp' =as.numeric(temp_df['delta_age_Var_Exp']),
+#         'Gender' = as.numeric(temp_p_vals['PTGENDER2']),
+#         'Gender_Coef' = as.numeric(temp_coef_vals['PTGENDER2']),
+#         'Gender_Var_Exp' =as.numeric(temp_df['Gender_Var_Exp']),
+#         'APOE' = as.numeric(min(temp_p_vals[grep('APOE',names(temp_p_vals))])),
+#         'APOE_Coef' = as.numeric(min(temp_coef_vals[grep('APOE',names(temp_p_vals))])),
+#         'APOE_Var_Exp' =as.numeric(temp_df['APOE_Var_Exp']),
+#         'Area_Name' = temp))
+#     }
+#   }
+#   
+#   rownames(Amyloid_ADNI_Association) = Amyloid_ADNI_Association$Area_Name
+#   Amyloid_ADNI_Association$Age_FDR_p = p.adjust(Amyloid_ADNI_Association$Age,method = 'fdr')
+#   # 
+#   Amyloid_ADNI_Association$delta_age_FDR_p = p.adjust(Amyloid_ADNI_Association$delta_age,method = 'fdr')
+#   Amyloid_ADNI_Association$Gender_FDR_pr = p.adjust(Amyloid_ADNI_Association$Gender,method = 'fdr')
+#   Amyloid_ADNI_Association$APOE_FDR_pr = p.adjust(Amyloid_ADNI_Association$APOE,method = 'fdr')
+#   
+#   return(Amyloid_ADNI_Association)
+# }
+# 
+# amyloid_adni_data_bl = amyloid_adni_data %>% filter(VISCODE2 == 'bl')
+# #amyloid_adni_data_m12 = amyloid_adni_data %>% filter(VISCODE2 == 'm12')
+# amyloid_adni_data_m24 = amyloid_adni_data %>% filter(VISCODE2 == 'm24')
+# 
+# Amyloid_ADNI_Association_f1_bl = run_amyloid_association_final_formula_1(amyloid_adni_data = amyloid_adni_data_bl, amyloid_areas = amyloid_areas)
+# #Amyloid_ADNI_Association_f1_m12 = run_amyloid_association_final_formula_1(amyloid_adni_data = amyloid_adni_data_m12, amyloid_areas = amyloid_areas)
+# Amyloid_ADNI_Association_f1_m24 = run_amyloid_association_final_formula_1(amyloid_adni_data = amyloid_adni_data_m24, amyloid_areas = amyloid_areas)
+# Amyloid_ADNI_Association_f1_bl_w_apoe = run_amyloid_association_final_formula_1_w_apoe(amyloid_adni_data = amyloid_adni_data_bl, amyloid_areas = amyloid_areas)
+# #Amyloid_ADNI_Association_f1_m12_w_apoe = run_amyloid_association_final_formula_1_w_apoe(amyloid_adni_data = amyloid_adni_data_m12, amyloid_areas = amyloid_areas)
+# Amyloid_ADNI_Association_f1_m24_w_apoe = run_amyloid_association_final_formula_1_w_apoe(amyloid_adni_data = amyloid_adni_data_m24, amyloid_areas = amyloid_areas)
+# 
+# write.csv(Amyloid_ADNI_Association_f1_bl,paste0(name_file_starter,'Whole_Population_Amyloid_ADNI_Association_f1_bl.csv'),quote = F, row.names = F)
+# #write.csv(Amyloid_ADNI_Association_f1_m12,paste0(name_file_starter,'Whole_Population_Amyloid_ADNI_Association_f1_m12.csv'),quote = F, row.names = F)
+# write.csv(Amyloid_ADNI_Association_f1_m24,paste0(name_file_starter,'Whole_Population_Amyloid_ADNI_Association_f1_m24.csv'),quote = F, row.names = F)
+# write.csv(Amyloid_ADNI_Association_f1_bl_w_apoe,paste0(name_file_starter,'Whole_Population_Amyloid_ADNI_Association_f1_bl_w_apoe.csv'),quote = F, row.names = F)
+# #write.csv(Amyloid_ADNI_Association_f1_m12_w_apoe,paste0(name_file_starter,'Whole_Population_Amyloid_ADNI_Association_f1_m12_w_apoe.csv'),quote = F, row.names = F)
+# write.csv(Amyloid_ADNI_Association_f1_m24_w_apoe,paste0(name_file_starter,'Whole_Population_Amyloid_ADNI_Association_f1_m24_w_apoe.csv'),quote = F, row.names = F)
+
+
+# CSF ---------------------------------------------------------------------
+
+csf = read.csv('ADNI_Data/CSF_Biomakers/UPENNBIOMK_MASTER_FINAL_16Nov2023.csv')
+csf = csf %>% filter(RID %in% predicted_adni_brain_age$RID)
+csf = csf %>% filter(BATCH == 'UPENNBIOMK9')
+table(csf$VISCODE2)
+csf = csf[,c('RID','VISCODE2','ABETA42','TAU','PTAU')]
+
+csf = na.omit(csf)
+csf$ABETA42[grepl('<',csf$ABETA42)] = 200
+csf$ABETA42[grepl('>',csf$ABETA42)] = 1700
+
+csf$TAU[grepl('<',csf$TAU)] = 80
+csf$PTAU[grepl('<',csf$PTAU)] = 8
+csf$PTAU[grepl('>',csf$PTAU)] = 120
+
+csf$ABETA42 = as.numeric(csf$ABETA42)
+csf$TAU = as.numeric(csf$TAU)
+csf$PTAU = as.numeric(csf$PTAU)
+
+#colnames(csf) = c('RID','VISCODE2',colnames(csf)[3:ncol(csf)])
+par(mfrow=c(2,3))
+hist(csf$ABETA42)
+hist(csf$TAU)
+hist(csf$PTAU)
+
+hist(log(csf$ABETA42))
+hist(log(csf$TAU))
+hist(log(csf$PTAU))
+
+colnames(csf)[which(colnames(csf) == 'ABETA42')] = 'ABETA'
+
+csf$ABETA = log(csf$ABETA)
+csf$TAU = log(csf$TAU)
+csf$PTAU = log(csf$PTAU)
+csf = merge(csf,demo_adni, by = c("RID"))
+csf = merge(csf,predicted_adni_brain_age, by = c("RID",'VISCODE2'))
+#csf = csf %>% filter(BATCH == 'MEDIAN')
+
+csf$Sex[which(csf$Sex == 'Male')] = 1
+csf$Sex[which(csf$Sex == 'Female')] = 0
+csf$Sex = as.numeric(csf$Sex)
+colnames(csf)[which(colnames(csf) == 'APOE4')] = 'APOE' 
+csf = csf[,c('RID','VISCODE2','Sex','Corrected_Predicted_Age','Actual_Age','ABETA','TAU','PTAU','Education','APOE')]
+colnames(csf)[which(colnames(csf) == 'age')] = 'AGE'
+#corrplot::corrplot(cor(csf[,c('Sex','Corrected_Predicted_Age','Actual_Age','ABETA','TAU','PTAU','Education','APOE')],use='pairwise.complete.obs'))
+plot(csf$PTAU,csf$Corrected_Predicted_Age)
+csf_areas = c('ABETA','TAU','PTAU')
+run_csf_association_final_formula_1_W_APOE = function(csf, csf_areas, formula_std = ' ~ delta_age + Actual_Age + APOE', reg=TRUE){
+  csf$delta_age = csf$Corrected_Predicted_Age - csf$Actual_Age
+  
+  start = TRUE
+  for(k in csf_areas){
+    
+    temp = k
+    if(reg){
+      target_line = paste0(temp,formula_std)
+      
+    }else{
+      target_line = paste0(formula_std,temp)
+      
+    }
+    lin_fit = lm(as.formula(target_line),
+                 data = csf)
+    
+    temp_p_vals = summary(lin_fit)$coefficients[,4]  
+    temp_coef_vals = summary(lin_fit)$coefficients[,1]  
+    temp_main_adj_r2 = summary(lin_fit)$adj.r.squared
+    
+    temp_df = data.frame('APOE_Var_Exp'= numeric(),
+                         'AGE_Var_Exp' = numeric(),
+                         'delta_age_Var_Exp' = numeric())
+    factors = c('Actual_Age',#'Corrected_Predicted_Age','BMI',
+                'delta_age','APOE')
+    for(i in 1:length(colnames(temp_df))){
+      factors_temp = factors[-i]
+      target_line_temp = paste0(temp,' ~ ',paste(factors_temp,collapse = ' + '))
+      lin_fit_temp = lm(as.formula(target_line_temp),
+                        data = csf)
+      temp_part_adj_r2 = summary(lin_fit_temp)$adj.r.squared
+      temp_df[1,i] = temp_main_adj_r2 - temp_part_adj_r2 
+      
+      
+    }
+    
+    
+    if(start){
+      csf_ADNI_Association = data.frame(
+        # 'Predicted_Age' = as.numeric(temp_p_vals['Corrected_Predicted_Age']),
+        # 'Predicted_Age_Coef' = as.numeric(temp_coef_vals['Corrected_Predicted_Age']),
+        # 'Predicted_Age_Var_Exp' =as.numeric(temp_df['Corrected_Predicted_Age_Var_Exp']),
+        'Age' = as.numeric(temp_p_vals['Actual_Age']),
+        'Age_Coef' = as.numeric(temp_coef_vals['Actual_Age']),
+        'Age_Var_Exp' =as.numeric(temp_df['AGE_Var_Exp']),
+        'delta_age' = as.numeric(temp_p_vals['delta_age']),
+        'delta_age_Coef' = as.numeric(temp_coef_vals['delta_age']),
+        'delta_age_Var_Exp' =as.numeric(temp_df['delta_age_Var_Exp']),
+        'APOE' = as.numeric(min(temp_p_vals[grep('APOE',names(temp_p_vals))])),
+        'APOE_Coef' = as.numeric(min(temp_coef_vals[grep('APOE',names(temp_p_vals))])),
+        'APOE_Var_Exp' =as.numeric(temp_df['APOE_Var_Exp']),
+        'Area_Name' = temp)
+      start = FALSE
+    }else{
+      csf_ADNI_Association = rbind(csf_ADNI_Association,data.frame(
+        # 'Predicted_Age' = as.numeric(temp_p_vals['Corrected_Predicted_Age']),
+        # 'Predicted_Age_Coef' = as.numeric(temp_coef_vals['Corrected_Predicted_Age']),
+        # 'Predicted_Age_Var_Exp' =as.numeric(temp_df['Corrected_Predicted_Age_Var_Exp']),
+        'Age' = as.numeric(temp_p_vals['Actual_Age']),
+        'Age_Coef' = as.numeric(temp_coef_vals['Actual_Age']),
+        'Age_Var_Exp' =as.numeric(temp_df['AGE_Var_Exp']),
+        'delta_age' = as.numeric(temp_p_vals['delta_age']),
+        'delta_age_Coef' = as.numeric(temp_coef_vals['delta_age']),
+        'delta_age_Var_Exp' =as.numeric(temp_df['delta_age_Var_Exp']),
+        'APOE' = as.numeric(min(temp_p_vals[grep('APOE',names(temp_p_vals))])),
+        'APOE_Coef' = as.numeric(min(temp_coef_vals[grep('APOE',names(temp_p_vals))])),
+        'APOE_Var_Exp' =as.numeric(temp_df['APOE_Var_Exp']),
+        'Area_Name' = temp))
+    }
+  }
+  
+  rownames(csf_ADNI_Association) = csf_ADNI_Association$Area_Name
+  csf_ADNI_Association$Age_FDR_p = p.adjust(csf_ADNI_Association$Age,method = 'fdr')
+  # 
+  csf_ADNI_Association$delta_age_FDR_p = p.adjust(csf_ADNI_Association$delta_age,method = 'fdr')
+  csf_ADNI_Association$APOE_FDR_pr = p.adjust(csf_ADNI_Association$APOE,method = 'fdr')
+  return(csf_ADNI_Association)
+}
+
+csf_adni_data_bl = csf %>% filter(VISCODE2 == 'bl')
+csf_adni_data_m12 = csf %>% filter(VISCODE2 == 'm12')
+csf_adni_data_m24 = csf %>% filter(VISCODE2 == 'm24')
+
+csf_ADNI_Association_f1_bl_w_apoe = run_csf_association_final_formula_1_W_APOE(csf = csf_adni_data_bl, csf_areas = csf_areas)
+csf_ADNI_Association_f1_m12_w_apoe = run_csf_association_final_formula_1_W_APOE(csf = csf_adni_data_m12, csf_areas = csf_areas)
+csf_ADNI_Association_f1_m24_w_apoe = run_csf_association_final_formula_1_W_APOE(csf = csf_adni_data_m24, csf_areas = csf_areas)
+
+csf_ADNI_Association_f1_bl_w_apoe$timepoint = 'BL'
+csf_ADNI_Association_f1_m12_w_apoe$timepoint = 'M12'
+csf_ADNI_Association_f1_m24_w_apoe$timepoint = 'M24'
+csf_ADNI_Association_f1 = rbind(csf_ADNI_Association_f1_bl_w_apoe,csf_ADNI_Association_f1_m12_w_apoe,
+                                csf_ADNI_Association_f1_m24_w_apoe)
+write.csv(csf_ADNI_Association_f1,paste0(name_file_starter,'Whole_Population_csf_ADNI_Association_f1.csv'),quote = F, row.names = F)
+
+# Plasma ------------------------------------------------------------------
+
+
+plasma = read.csv('ADNI_Data/Plasma_Files/UPENNPLASMA.csv')
+plasma = plasma %>% filter(RID %in% predicted_adni_brain_age$RID)
+colnames(plasma) = c('RID','VISCODE2',colnames(plasma)[3:ncol(plasma)])
+plasma$AB42 = log(plasma$AB42)
+plasma$AB40 = log(plasma$AB40)
+plasma = merge(plasma,demo_adni, by = c("RID"))
+plasma$Sex[which(plasma$Sex == 'Male')] = 1
+plasma$Sex[which(plasma$Sex == 'Female')] = 0
+plasma$Sex = as.numeric(plasma$Sex)
+colnames(plasma)[which(colnames(plasma) == 'age')] = 'AGE'
+plasma = merge(plasma,predicted_adni_brain_age, by = c("RID","VISCODE2"))
+
+#corrplot::corrplot(cor(plasma[,c('Sex','Corrected_Predicted_Age','Actual_Age','AB42','AB40','BMI','Education','APOE4')],use='pairwise.complete.obs'))
+run_plasma_association_final_formula_1_W_APOE = function(plasma, plasma_areas = c('AB40','AB42'), formula_std = ' ~ delta_age + Actual_Age + APOE', reg=TRUE){
+  plasma$delta_age = plasma$Corrected_Predicted_Age - plasma$Actual_Age
+  
+  start = TRUE
+  for(k in plasma_areas){
+    
+    temp = k
+    if(reg){
+      target_line = paste0(temp,formula_std)
+      
+    }else{
+      target_line = paste0(formula_std,temp)
+      
+    }
+    lin_fit = lm(as.formula(target_line),
+                 data = plasma)
+    
+    temp_p_vals = summary(lin_fit)$coefficients[,4]  
+    temp_coef_vals = summary(lin_fit)$coefficients[,1]  
+    temp_main_adj_r2 = summary(lin_fit)$adj.r.squared
+    
+    temp_df = data.frame('APOE_Var_Exp'= numeric(),
+                         'AGE_Var_Exp' = numeric(),
+                         'delta_age_Var_Exp' = numeric())
+    factors = c('Actual_Age',#'Corrected_Predicted_Age','BMI',
+                'delta_age','APOE')
+    for(i in 1:length(colnames(temp_df))){
+      factors_temp = factors[-i]
+      target_line_temp = paste0(temp,' ~ ',paste(factors_temp,collapse = ' + '))
+      lin_fit_temp = lm(as.formula(target_line_temp),
+                        data = plasma)
+      temp_part_adj_r2 = summary(lin_fit_temp)$adj.r.squared
+      temp_df[1,i] = temp_main_adj_r2 - temp_part_adj_r2 
+      
+      
+    }
+    
+    
+    if(start){
+      plasma_ADNI_Association = data.frame(
+        # 'Predicted_Age' = as.numeric(temp_p_vals['Corrected_Predicted_Age']),
+        # 'Predicted_Age_Coef' = as.numeric(temp_coef_vals['Corrected_Predicted_Age']),
+        # 'Predicted_Age_Var_Exp' =as.numeric(temp_df['Corrected_Predicted_Age_Var_Exp']),
+        'Age' = as.numeric(temp_p_vals['Actual_Age']),
+        'Age_Coef' = as.numeric(temp_coef_vals['Actual_Age']),
+        'Age_Var_Exp' =as.numeric(temp_df['AGE_Var_Exp']),
+        'delta_age' = as.numeric(temp_p_vals['delta_age']),
+        'delta_age_Coef' = as.numeric(temp_coef_vals['delta_age']),
+        'delta_age_Var_Exp' =as.numeric(temp_df['delta_age_Var_Exp']),
+        'APOE' = as.numeric(min(temp_p_vals[grep('APOE',names(temp_p_vals))])),
+        'APOE_Coef' = as.numeric(min(temp_coef_vals[grep('APOE',names(temp_p_vals))])),
+        'APOE_Var_Exp' =as.numeric(temp_df['APOE_Var_Exp']),
+        'Area_Name' = temp)
+      start = FALSE
+    }else{
+      plasma_ADNI_Association = rbind(plasma_ADNI_Association,data.frame(
+        # 'Predicted_Age' = as.numeric(temp_p_vals['Corrected_Predicted_Age']),
+        # 'Predicted_Age_Coef' = as.numeric(temp_coef_vals['Corrected_Predicted_Age']),
+        # 'Predicted_Age_Var_Exp' =as.numeric(temp_df['Corrected_Predicted_Age_Var_Exp']),
+        'Age' = as.numeric(temp_p_vals['Actual_Age']),
+        'Age_Coef' = as.numeric(temp_coef_vals['Actual_Age']),
+        'Age_Var_Exp' =as.numeric(temp_df['AGE_Var_Exp']),
+        'delta_age' = as.numeric(temp_p_vals['delta_age']),
+        'delta_age_Coef' = as.numeric(temp_coef_vals['delta_age']),
+        'delta_age_Var_Exp' =as.numeric(temp_df['delta_age_Var_Exp']),
+        'APOE' = as.numeric(min(temp_p_vals[grep('APOE',names(temp_p_vals))])),
+        'APOE_Coef' = as.numeric(min(temp_coef_vals[grep('APOE',names(temp_p_vals))])),
+        'APOE_Var_Exp' =as.numeric(temp_df['APOE_Var_Exp']),
+        'Area_Name' = temp))
+    }
+  }
+  
+  rownames(plasma_ADNI_Association) = plasma_ADNI_Association$Area_Name
+  plasma_ADNI_Association$Age_FDR_p = p.adjust(plasma_ADNI_Association$Age,method = 'fdr')
+  # 
+  plasma_ADNI_Association$delta_age_FDR_p = p.adjust(plasma_ADNI_Association$delta_age,method = 'fdr')
+  plasma_ADNI_Association$APOE_FDR_pr = p.adjust(plasma_ADNI_Association$APOE,method = 'fdr')
+  return(plasma_ADNI_Association)
+}
+
+plasma_adni_data_bl = plasma %>% filter(VISCODE2 == 'bl')
+plasma_adni_data_m12 = plasma %>% filter(VISCODE2 == 'm12')
+plasma_adni_data_m24 = plasma %>% filter(VISCODE2 == 'm24')
+
+plasma_ADNI_Association_f1_bl_w_apoe = run_plasma_association_final_formula_1_W_APOE(plasma = plasma_adni_data_bl)
+plasma_ADNI_Association_f1_m12_w_apoe = run_plasma_association_final_formula_1_W_APOE(plasma = plasma_adni_data_m12)
+plasma_ADNI_Association_f1_m24_w_apoe = run_plasma_association_final_formula_1_W_APOE(plasma = plasma_adni_data_m24)
+plasma_ADNI_Association_f1_bl_w_apoe$timepoint = 'BL'
+plasma_ADNI_Association_f1_m12_w_apoe$timepoint = 'M12'
+plasma_ADNI_Association_f1_m24_w_apoe$timepoint = 'M24'
+plasma_ADNI_Association_f1 = rbind(plasma_ADNI_Association_f1_bl_w_apoe,plasma_ADNI_Association_f1_m12_w_apoe,
+                                plasma_ADNI_Association_f1_m24_w_apoe)
+write.csv(plasma_ADNI_Association_f1,paste0(name_file_starter,'Whole_Population_plasma_ADNI_Association_f1.csv'),quote = F, row.names = F)
+
+
+
+# FDG PET -----------------------------------------------------------------
+
+
+fdg = read.csv('Data/ADNI1GO23_FDG_PET.csv')
+
+fdg = fdg %>% filter(RID %in% predicted_adni_brain_age$RID)
+
+fdg_timepoints = c('BL','M12','M24')
+date_labels = grepl('_Date',colnames(fdg))
+fdg = fdg[,!date_labels]
+#Segregating the variables by timepoints
+start = TRUE
+for(timepoint in fdg_timepoints){
+  if(start){
+    fdg_t = fdg[,c(1,grep(timepoint,colnames(fdg)))]
+    fdg_areas = sapply(colnames(fdg_t)[grep('_FDG_',colnames(fdg_t))],
+                       function(x){return(strsplit(x,'_FDG_')[[1]][2])})
+    colnames(fdg_t) = c('RID',fdg_areas)
+    fdg_t$VISCODE2 = timepoint
+    start = FALSE
+  }else{
+    temp = fdg[,c(1,grep(paste0(timepoint,'_'),colnames(fdg)))]
+    if(is.vector(temp)){
+      print(paste0('Data not available for month ',timepoint))
+    }else{
+      colnames(temp) = c('RID',fdg_areas)
+      temp$VISCODE2 = timepoint
+      fdg_t  = rbind(fdg_t, temp)
+    }
+    
+  }
+}
+fdg_t = na.omit(fdg_t)
+fdg_t$VISCODE2 = tolower(fdg_t$VISCODE2)
+fdg_t = merge(fdg_t,complete_data_w_covariate, by = c("RID", "VISCODE2"))
+fdg_names = colnames(fdg_t)[3:9]
+run_fdg_association_final_formula_1_W_APOE = function(fdg, fdg_areas = fdg_names, formula_std = ' ~ delta_age + Actual_Age + APOE + Sex', reg=TRUE){
+  fdg$delta_age = fdg$Corrected_Predicted_Age - fdg$Actual_Age
+  
+  start = TRUE
+  for(k in fdg_areas){
+    
+    temp = k
+    if(reg){
+      target_line = paste0(temp,formula_std)
+      
+    }else{
+      target_line = paste0(formula_std,temp)
+      
+    }
+    lin_fit = lm(as.formula(target_line),
+                 data = fdg)
+    
+    temp_p_vals = summary(lin_fit)$coefficients[,4]  
+    temp_coef_vals = summary(lin_fit)$coefficients[,1]  
+    temp_main_adj_r2 = summary(lin_fit)$adj.r.squared
+    
+    temp_df = data.frame('delta_age_Var_Exp' = numeric(),
+                         'AGE_Var_Exp' = numeric(),
+                         'APOE_Var_Exp'= numeric(),
+                         'Sex_Var_Exp'= numeric())
+    factors = c('delta_age','Actual_Age','APOE','Sex')
+    for(i in 1:length(colnames(temp_df))){
+      factors_temp = factors[-i]
+      target_line_temp = paste0(temp,' ~ ',paste(factors_temp,collapse = ' + '))
+      lin_fit_temp = lm(as.formula(target_line_temp),
+                        data = fdg)
+      temp_part_adj_r2 = summary(lin_fit_temp)$adj.r.squared
+      temp_df[1,i] = temp_main_adj_r2 - temp_part_adj_r2 
+      
+      
+    }
+    
+    
+    if(start){
+      fdg_ADNI_Association = data.frame(
+        # 'Predicted_Age' = as.numeric(temp_p_vals['Corrected_Predicted_Age']),
+        # 'Predicted_Age_Coef' = as.numeric(temp_coef_vals['Corrected_Predicted_Age']),
+        # 'Predicted_Age_Var_Exp' =as.numeric(temp_df['Corrected_Predicted_Age_Var_Exp']),
+        'Age' = as.numeric(temp_p_vals['Actual_Age']),
+        'Age_Coef' = as.numeric(temp_coef_vals['Actual_Age']),
+        'Age_Var_Exp' =as.numeric(temp_df['AGE_Var_Exp']),
+        'delta_age' = as.numeric(temp_p_vals['delta_age']),
+        'delta_age_Coef' = as.numeric(temp_coef_vals['delta_age']),
+        'delta_age_Var_Exp' =as.numeric(temp_df['delta_age_Var_Exp']),
+        'APOE' = as.numeric(min(temp_p_vals[grep('APOE',names(temp_p_vals))])),
+        'APOE_Coef' = as.numeric(min(temp_coef_vals[grep('APOE',names(temp_p_vals))])),
+        'APOE_Var_Exp' =as.numeric(temp_df['APOE_Var_Exp']),
+        'Sex' = as.numeric(min(temp_p_vals[grep('Sex',names(temp_p_vals))])),
+        'Sex_Coef' = as.numeric(min(temp_coef_vals[grep('Sex',names(temp_p_vals))])),
+        'Sex_Var_Exp' =as.numeric(temp_df['Sex_Var_Exp']),
+        'Area_Name' = temp)
+      start = FALSE
+    }else{
+      fdg_ADNI_Association = rbind(fdg_ADNI_Association,data.frame(
+        # 'Predicted_Age' = as.numeric(temp_p_vals['Corrected_Predicted_Age']),
+        # 'Predicted_Age_Coef' = as.numeric(temp_coef_vals['Corrected_Predicted_Age']),
+        # 'Predicted_Age_Var_Exp' =as.numeric(temp_df['Corrected_Predicted_Age_Var_Exp']),
+        'Age' = as.numeric(temp_p_vals['Actual_Age']),
+        'Age_Coef' = as.numeric(temp_coef_vals['Actual_Age']),
+        'Age_Var_Exp' =as.numeric(temp_df['AGE_Var_Exp']),
+        'delta_age' = as.numeric(temp_p_vals['delta_age']),
+        'delta_age_Coef' = as.numeric(temp_coef_vals['delta_age']),
+        'delta_age_Var_Exp' =as.numeric(temp_df['delta_age_Var_Exp']),
+        'APOE' = as.numeric(min(temp_p_vals[grep('APOE',names(temp_p_vals))])),
+        'APOE_Coef' = as.numeric(min(temp_coef_vals[grep('APOE',names(temp_p_vals))])),
+        'APOE_Var_Exp' =as.numeric(temp_df['APOE_Var_Exp']),
+        'Sex' = as.numeric(min(temp_p_vals[grep('Sex',names(temp_p_vals))])),
+        'Sex_Coef' = as.numeric(min(temp_coef_vals[grep('Sex',names(temp_p_vals))])),
+        'Sex_Var_Exp' =as.numeric(temp_df['Sex_Var_Exp']),
+        'Area_Name' = temp))
+    }
+  }
+  
+  rownames(fdg_ADNI_Association) = fdg_ADNI_Association$Area_Name
+  fdg_ADNI_Association$Age_FDR_p = p.adjust(fdg_ADNI_Association$Age,method = 'fdr')
+  fdg_ADNI_Association$Sex_FDR_p = p.adjust(fdg_ADNI_Association$Sex,method = 'fdr')
+  
+  fdg_ADNI_Association$delta_age_FDR_p = p.adjust(fdg_ADNI_Association$delta_age,method = 'fdr')
+  fdg_ADNI_Association$APOE_FDR_pr = p.adjust(fdg_ADNI_Association$APOE,method = 'fdr')
+  return(fdg_ADNI_Association)
+}
+
+fdg_ADNI_Association_f1_bl_w_apoe = run_fdg_association_final_formula_1_W_APOE(fdg = fdg_t %>% filter(VISCODE2 == 'bl'))
+fdg_ADNI_Association_f1_m12_w_apoe = run_fdg_association_final_formula_1_W_APOE(fdg = fdg_t %>% filter(VISCODE2 == 'm12'))
+fdg_ADNI_Association_f1_m24_w_apoe = run_fdg_association_final_formula_1_W_APOE(fdg = fdg_t %>% filter(VISCODE2 == 'm24'))
+fdg_ADNI_Association_f1_bl_w_apoe$timepoint = 'BL'
+fdg_ADNI_Association_f1_m12_w_apoe$timepoint = 'M12'
+fdg_ADNI_Association_f1_m24_w_apoe$timepoint = 'M24'
+fdg_ADNI_Association_f1 = rbind(fdg_ADNI_Association_f1_bl_w_apoe,fdg_ADNI_Association_f1_m12_w_apoe,
+                                   fdg_ADNI_Association_f1_m24_w_apoe)
+write.csv(fdg_ADNI_Association_f1,paste0(name_file_starter,'Whole_Population_fdg_ADNI_Association_f1.csv'),quote = F, row.names = F)
+
+
+
+}
+
+
+plot(csf_adni_data_bl$ABETA, csf_adni_data_bl$TAU,
+     pch=18, 
+     cex=0.5, 
+     col="#69b3a2",
+     xlab="ABETA", ylab="TAU",
+     main="Baseline Values of ABETA and TAU"
+)
+
+plot(csf_adni_data_bl$ABETA, csf_adni_data_bl$PTAU,
+     pch=18, 
+     cex=0.5, 
+     col="#69b3a2",
+     xlab="ABETA", ylab="PTAU",
+     main="Baseline Values of ABETA and PTAU"
+)
+
+plot(csf_adni_data_bl$TAU, csf_adni_data_bl$PTAU,
+     pch=18, 
+     cex=0.5, 
+     col="#69b3a2",
+     xlab="TAU", ylab="PTAU",
+     main="Baseline Values of TAU and PTAU"
+)
+
+
+
+# Cognitive Score ---------------------------------------------------------
+############################### IMPORTANT NOTE : ONLY FOR POLY BIAS MODEL #########################################
+cognitive_scores = readRDS('Data/LongitudianlDataPrepared/Cognitivie_Scores.RDS')
+cognitive_areas = c('_ADNI_MEM','_ADNI_EF','_ADNI_LAN','_ADNI_VS')
+
+run_cognitive_association_final_formula = function(data, cognitive_areas,timepoint='bl', formula_std = ' ~ delta_age + Actual_Age + Sex + Education', reg=TRUE){
+  
+  
+  start = TRUE
+  for(k in cognitive_areas){
+    data_temp = data[[k]]
+    data_temp = data_temp %>% filter(VISCODE2 == timepoint)
+    data_temp$delta_age = data_temp$Corrected_Predicted_Age - data_temp$Actual_Age
+    temp = substr(k,2,nchar(k))
+    if(reg){
+      target_line = paste0(temp,formula_std)
+      
+    }else{
+      target_line = paste0(formula_std,temp)
+      
+    }
+    lin_fit = lm(as.formula(target_line),
+                 data = data_temp)
+    
+    temp_p_vals = summary(lin_fit)$coefficients[,4]  
+    temp_coef_vals = summary(lin_fit)$coefficients[,1]  
+    temp_main_adj_r2 = summary(lin_fit)$adj.r.squared
+    
+    temp_df = data.frame('Sex_Var_Exp' = numeric(),
+                         # 'Corrected_Predicted_Age_Var_Exp' = numeric(),
+                         'Actual_Age_Var_Exp' = numeric(),
+                         'delta_age_Var_Exp' = numeric(),
+                         'Education_Var_Exp' = numeric())
+    factors = c('Sex','Actual_Age',#'Corrected_Predicted_Age','BMI',
+                'delta_age',
+                'Education')
+    for(i in 1:length(colnames(temp_df))){
+      factors_temp = factors[-i]
+      target_line_temp = paste0(temp,' ~ ',paste(factors_temp,collapse = ' + '))
+      lin_fit_temp = lm(as.formula(target_line_temp),
+                        data = data_temp)
+      temp_part_adj_r2 = summary(lin_fit_temp)$adj.r.squared
+      temp_df[1,i] = temp_main_adj_r2 - temp_part_adj_r2 
+      
+      
+    }
+    
+    
+    if(start){
+     Association = data.frame(
+        # 'Predicted_Age' = as.numeric(temp_p_vals['Corrected_Predicted_Age']),
+        # 'Predicted_Age_Coef' = as.numeric(temp_coef_vals['Corrected_Predicted_Age']),
+        # 'Predicted_Age_Var_Exp' =as.numeric(temp_df['Corrected_Predicted_Age_Var_Exp']),
+        'Age' = as.numeric(temp_p_vals['Actual_Age']),
+        'Age_Coef' = as.numeric(temp_coef_vals['Actual_Age']),
+        'Age_Var_Exp' =as.numeric(temp_df['Actual_Age_Var_Exp']),
+        'delta_age' = as.numeric(temp_p_vals['delta_age']),
+        'delta_age_Coef' = as.numeric(temp_coef_vals['delta_age']),
+        'delta_age_Var_Exp' =as.numeric(temp_df['delta_age_Var_Exp']),
+        'Sex' = as.numeric(temp_p_vals['Sex1']),
+        'Sex_Coef' = as.numeric(temp_coef_vals['Sex1']),
+        'Sex_Var_Exp' =as.numeric(temp_df['Sex_Var_Exp']),
+        'Education' = as.numeric(temp_p_vals['Education']),
+        'Education_Coef' = as.numeric(temp_coef_vals['Education']),
+        'Education_Var_Exp' =as.numeric(temp_df['Education_Var_Exp']),
+        # 'BMI' = as.numeric(temp_p_vals['BMI']),
+        # 'BMI_Coef' = as.numeric(temp_coef_vals['BMI']),
+        # 'BMI_Var_Exp' =as.numeric(temp_df['BMI_BM_Var_Exp']),
+        'Area_Name' = temp)
+      start = FALSE
+    }else{
+      Association = rbind(Association,data.frame(
+        # 'Predicted_Age' = as.numeric(temp_p_vals['Corrected_Predicted_Age']),
+        # 'Predicted_Age_Coef' = as.numeric(temp_coef_vals['Corrected_Predicted_Age']),
+        # 'Predicted_Age_Var_Exp' =as.numeric(temp_df['Corrected_Predicted_Age_Var_Exp']),
+        'Age' = as.numeric(temp_p_vals['Actual_Age']),
+        'Age_Coef' = as.numeric(temp_coef_vals['Actual_Age']),
+        'Age_Var_Exp' =as.numeric(temp_df['Actual_Age_Var_Exp']),
+        'delta_age' = as.numeric(temp_p_vals['delta_age']),
+        'delta_age_Coef' = as.numeric(temp_coef_vals['delta_age']),
+        'delta_age_Var_Exp' =as.numeric(temp_df['delta_age_Var_Exp']),
+        'Sex' = as.numeric(temp_p_vals['Sex1']),
+        'Sex_Coef' = as.numeric(temp_coef_vals['Sex1']),
+        'Sex_Var_Exp' =as.numeric(temp_df['Sex_Var_Exp']),
+        'Education' = as.numeric(temp_p_vals['Education']),
+        'Education_Coef' = as.numeric(temp_coef_vals['Education']),
+        'Education_Var_Exp' =as.numeric(temp_df['Education_Var_Exp']),
+        # 'BMI' = as.numeric(temp_p_vals['BMI']),
+        # 'BMI_Coef' = as.numeric(temp_coef_vals['BMI']),
+        # 'BMI_Var_Exp' =as.numeric(temp_df['BMI_BM_Var_Exp']),
+        'Area_Name' = temp))
+    }
+  }
+  
+  rownames(Association) = Association$Area_Name
+  # MRI_ADNI_Association$Predicted_Age_FDR_p = p.adjust(MRI_ADNI_Association$Predicted_Age,method = 'fdr')
+  Association$Age_FDR_p = p.adjust(Association$Age,method = 'fdr')
+  # 
+  Association$delta_age_FDR_p = p.adjust(Association$delta_age,method = 'fdr')
+  Association$Sex_FDR_pr = p.adjust(Association$Sex,method = 'fdr')
+  Association$Education_FDR_p = p.adjust(Association$Education,method = 'fdr')
+  # MRI_ADNI_Association$BMI_FDR_p = p.adjust(MRI_ADNI_Association$BMI,method = 'fdr')
+  
+  return(Association)
+}
+
+
+
+
+
+
+bl_cognitive_association = run_cognitive_association_final_formula(cognitive_scores, cognitive_areas,'bl')
+m12_cognitive_association = run_cognitive_association_final_formula(cognitive_scores, cognitive_areas,'m12')
+m24_cognitive_association = run_cognitive_association_final_formula(cognitive_scores, cognitive_areas,'m24')
+
+bl_cognitive_association$timepoint = 'BL'
+m12_cognitive_association$timepoint = 'M12'
+m24_cognitive_association$timepoint = 'M24'
+cognitive_association = rbind(bl_cognitive_association,m12_cognitive_association,
+                              m24_cognitive_association)
+write.csv(cognitive_association,paste0(name_file_starter,'Whole_Population_Cognitive_ADNI_Association.csv'),quote = F, row.names = F)
+
+

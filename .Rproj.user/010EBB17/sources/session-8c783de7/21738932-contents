@@ -1,0 +1,438 @@
+
+
+library(ggplot2)
+library(lme4)
+library(nlme)
+library(dplyr)
+library(bootpredictlme4)
+
+type_sub = ''
+
+# Data Input --------------------------------------------------------------
+mri_adni_data_bl_delta_age = read.csv(paste0('Data/LongitudianlDataPrepared/MRI_Longitudinal_ADNI_mod',type_sub,'.csv'),stringsAsFactors = T)
+csf_bl_delta_age = read.csv(paste0('Data/LongitudianlDataPrepared/CSF_Longitudinal_ADNI',type_sub,'.csv'))
+plasma_bl_delta_age = read.csv(paste0('Data/LongitudianlDataPrepared/Plasma_Longitudinal_ADNI',type_sub,'.csv'),stringsAsFactors = T)
+fdg_bl_delta_age = read.csv(paste0('Data/LongitudianlDataPrepared/FDG_Longitudinal_ADNI',type_sub,'.csv'))
+cognitive_scores = readRDS(paste0('Data/LongitudianlDataPrepared/Cognitivie_Scores',type_sub,'.RDS'))
+
+#Testing for skewness
+test_skewness = function(data, breaks = 30){
+  
+  hist(data,breaks = breaks, main = paste0('Skewness: ',as.character(skewness(na.omit(data)))),xlab = deparse(substitute(data)))
+  
+}
+
+## RUN SKEWNESS CHECK
+checkskew = T
+if(checkskew == TRUE){
+  
+  par(mfrow = c(3,3))
+  test_skewness(log(mri_adni_data_bl_delta_age$HippVol))
+  test_skewness(log(mri_adni_data_bl_delta_age$entorhinal_thickness))
+  test_skewness(log(csf_bl_delta_age$ABETA))
+  test_skewness(log(csf_bl_delta_age$TAU))
+  test_skewness(log(csf_bl_delta_age$PTAU))
+  test_skewness(log(plasma_bl_delta_age$AB40))
+  test_skewness(log(plasma_bl_delta_age$AB42))
+  test_skewness(cognitive_scores$`_ADNI_MEM`$ADNI_MEM)
+  test_skewness(cognitive_scores$`_ADNI_EF`$ADNI_EF)
+  
+}
+
+
+mri_adni_data_bl_delta_age$APOE4 = as.factor(mri_adni_data_bl_delta_age$APOE4)
+if(type_sub!=""){mri_adni_data_bl_delta_age$Sex = as.factor(mri_adni_data_bl_delta_age$Sex)}
+
+csf_bl_delta_age$APOE4 = as.factor(csf_bl_delta_age$APOE4)
+if(type_sub!=""){csf_bl_delta_age$Sex = as.factor(csf_bl_delta_age$Sex)}
+csf_bl_delta_age = csf_bl_delta_age %>% filter(year <= 5)
+csf_bl_delta_age_subjects_more_than_one = names(table(csf_bl_delta_age$RID)[table(csf_bl_delta_age$RID) != 1])
+csf_bl_delta_age = csf_bl_delta_age %>% filter(RID %in% csf_bl_delta_age_subjects_more_than_one)
+
+plasma_bl_delta_age$APOE4 = as.factor(plasma_bl_delta_age$APOE4)
+if(type_sub!=""){plasma_bl_delta_age$Sex = as.factor(plasma_bl_delta_age$Sex)}
+
+fdg_bl_delta_age$APOE4 = as.factor(fdg_bl_delta_age$APOE4)
+if(type_sub!=""){fdg_bl_delta_age$Sex = as.factor(fdg_bl_delta_age$Sex)}
+
+
+mri_interaction_effect = function(data, formula_delta = TRUE){
+  data = data[,c('Actual_Age','APOE4','Sex','ICV','delta_age','year','RID','Education','Corrected_Predicted_Age','HippVol','entorhinal_thickness')]
+  data = na.omit(data)
+  if(formula_delta){
+    
+    og = lmer(HippVol ~ 1 + Actual_Age+Sex+APOE4+scale(ICV)+Education+delta_age*year + (1 + year|RID),data, REML = FALSE)
+    og.n = lmer(HippVol ~ 1 + Actual_Age+Sex+APOE4+scale(ICV)+Education+delta_age+year +(1 + year|RID),data, REML = FALSE)
+    k = anova(og,og.n)
+    rownames(k) = c("HippVol_with_delta_age*year","HippVol_without_delta_age*year")
+    og2 = lmer(entorhinal_thickness ~ 1 + Actual_Age+Sex+APOE4+Education+scale(ICV)+delta_age*year + (1 + year|RID),data, REML = FALSE)
+    og.n2 = lmer(entorhinal_thickness ~ 1 + Actual_Age+Sex+APOE4+Education+scale(ICV)+delta_age+year +(1 + year|RID),data, REML = FALSE)
+    k2 = anova(og2,og.n2)
+    rownames(k2) = c("entorhinal_thickness_with_delta_age*year","entorhinal_thickness_without_delta_age*year")
+    k = rbind(k,k2)
+    
+  }else{
+    
+    og = lmer(log(HippVol) ~ 1 + Actual_Age+Sex+APOE4+log(ICV)+Corrected_Predicted_Age*year + (1 + year|RID),data, REML = FALSE)
+    og.n = lmer(log(HippVol) ~ 1 + Actual_Age+Sex+APOE4+log(ICV)+Corrected_Predicted_Age+year +(1 + year|RID),data, REML = FALSE)
+    k = anova(og,og.n)
+    rownames(k) = c("HippVol_with_Corrected_Predicted_Age*year","HippVol_without_Corrected_Predicted_Age*year")
+    og2 = lmer(log(entorhinal_thickness) ~ 1 + Actual_Age+Sex+APOE4+log(ICV)+Corrected_Predicted_Age*year + (1 + year|RID),data, REML = FALSE)
+    og.n2 = lmer(log(entorhinal_thickness) ~ 1 + Actual_Age+Sex+APOE4+log(ICV)+Corrected_Predicted_Age+year +(1 + year|RID),data, REML = FALSE)
+    k2 = anova(og2,og.n2)
+    rownames(k2) = c("entorhinal_thickness_with_Corrected_Predicted_Age*year","entorhinal_thickness_without_Corrected_Predicted_Age*year")
+    k = rbind(k,k2)
+    
+  }
+  out_list = list('hipp_model' = og,
+                  'ent_model' = og2,
+                  'model_stats' = k)
+  return(out_list)
+}
+csf_interaction_effect = function(data, formula_delta = TRUE){
+  data = data[,c('Actual_Age','APOE4','delta_age','year','RID','Corrected_Predicted_Age','ABETA','TAU','PTAU')]
+  data = na.omit(data)
+    if(formula_delta){
+    data$year = data$year * 12
+    og = lmer(ABETA ~ 1 + Actual_Age+ APOE4+ delta_age*year + (1 + year|RID),data, REML = FALSE)
+    og.n = lmer(ABETA ~ 1 + Actual_Age+ APOE4+ delta_age+year+ (1 + year|RID),data, REML = FALSE)
+    k = anova(og,og.n)
+    rownames(k) = c("ABETA_with_delta_age*year","ABETA_without_delta_age*year")
+    og2 = lmer(log(TAU) ~ 1 + Actual_Age+ APOE4+ delta_age*year + (1 + year|RID),data, REML = FALSE)
+    og.n2 = lmer(log(TAU) ~ 1 + Actual_Age+ APOE4+ delta_age+year+ (1 + year|RID),data, REML = FALSE)
+    k2 = anova(og2,og.n2)
+    rownames(k2) = c("TAU_with_delta_age*year","TAU_without_delta_age*year")
+    og3 = lmer(log(PTAU) ~ 1 + Actual_Age+ APOE4+ delta_age*year + (1 + year|RID),data, REML = FALSE)
+    og.n3 = lmer(log(PTAU) ~ 1 + Actual_Age+ APOE4+ delta_age+year+ (1 + year|RID),data, REML = FALSE)
+    k3 = anova(og3,og.n3)
+    rownames(k3) = c("PTAU_with_delta_age*year","PTAU_without_delta_age*year")
+    
+    k = rbind(k,k2,k3)
+    
+  }else{
+    
+    og = lmer(log(ABETA) ~ 1 + Actual_Age+ APOE4+ Corrected_Predicted_Age*year + (1 + year|RID),data, REML = FALSE)
+    og.n = lmer(log(ABETA) ~ 1 + Actual_Age+ APOE4+ Corrected_Predicted_Age+year+ (1 + year|RID),data, REML = FALSE)
+    k = anova(og,og.n)
+    rownames(k) = c("ABETA_with_Corrected_Predicted_Age*year","ABETA_without_Corrected_Predicted_Age*year")
+    og2 = lmer(log(TAU) ~ 1 + Actual_Age+ APOE4+ Corrected_Predicted_Age*year + (1 + year|RID),data, REML = FALSE)
+    og.n2 = lmer(log(TAU) ~ 1 + Actual_Age+ APOE4+ Corrected_Predicted_Age+year+ (1 + year|RID),data, REML = FALSE)
+    k2 = anova(og2,og.n2)
+    rownames(k2) = c("TAU_with_Corrected_Predicted_Age*year","TAU_without_Corrected_Predicted_Age*year")
+    og3 = lmer(log(PTAU) ~ 1 + Actual_Age+ APOE4+ Corrected_Predicted_Age*year + (1 + year|RID),data, REML = FALSE)
+    og.n3 = lmer(log(PTAU) ~ 1 + Actual_Age+ APOE4+ Corrected_Predicted_Age+year+ (1 + year|RID),data, REML = FALSE)
+    k3 = anova(og3,og.n3)
+    rownames(k3) = c("PTAU_with_Corrected_Predicted_Age*year","PTAU_without_Corrected_Predicted_Age*year")
+    
+    k = rbind(k,k2,k3)
+    
+  }
+  out_list = list('ABETA_model' = og,
+                  'TAU_model' = og2,
+                  'PTAU_model' = og3,
+                  'model_stats' = k)
+  return(out_list)
+}
+plasma_interaction_effect = function(data, formula_delta = TRUE){
+  data = data[,c('Actual_Age','APOE4','delta_age','year','RID','Corrected_Predicted_Age','AB40','AB42')]
+  data = na.omit(data)
+  if(formula_delta){
+    
+    og = lmer(AB40 ~ 1 + Actual_Age+ APOE4+ delta_age*year + (1 + year|RID),data, REML = FALSE)
+    og.n = lmer(AB40 ~ 1 + Actual_Age+ APOE4+ delta_age+year+ (1 + year|RID),data, REML = FALSE)
+    k = anova(og,og.n)
+    rownames(k) = c("AB40_with_delta_age*year","AB40_without_delta_age*year")
+    og2 = lmer(log(AB42) ~ 1 + Actual_Age+ APOE4+ delta_age*year + (1 + year|RID),data, REML = FALSE)
+    og.n2 = lmer(log(AB42) ~ 1 + Actual_Age+ APOE4+ delta_age+year+ (1 + year|RID),data, REML = FALSE)
+    k2 = anova(og2,og.n2)
+    rownames(k2) = c("AB42_with_delta_age*year","AB42_without_delta_age*year")
+    
+    k = rbind(k,k2)
+    
+  }else{
+    
+    og = lmer(log(AB40) ~ 1 + Actual_Age+ APOE4+ Corrected_Predicted_Age*year + (1 + year|RID),data, REML = FALSE)
+    og.n = lmer(log(AB40) ~ 1 + Actual_Age+ APOE4+ Corrected_Predicted_Age+year+ (1 + year|RID),data, REML = FALSE)
+    k = anova(og,og.n)
+    rownames(k) = c("AB40_with_Corrected_Predicted_Age*year","AB40_without_Corrected_Predicted_Age*year")
+    og2 = lmer(log(AB42) ~ 1 + Actual_Age+ APOE4+ Corrected_Predicted_Age*year + (1 + year|RID),data, REML = FALSE)
+    og.n2 = lmer(log(AB42) ~ 1 + Actual_Age+ APOE4+ Corrected_Predicted_Age+year+ (1 + year|RID),data, REML = FALSE)
+    k2 = anova(og2,og.n2)
+    rownames(k2) = c("AB42_with_Corrected_Predicted_Age*year","AB42_without_Corrected_Predicted_Age*year")
+    
+    k = rbind(k,k2)
+    
+  }
+  out_list = list('AB40_model' = og,
+                  'AB42_model' = og2,
+                  'model_stats' = k)
+  return(out_list)
+}
+fdg_interaction_effect = function(data, formula_delta = TRUE){
+  data = data[,c('Actual_Age','APOE4','delta_age','year','BMI','RID','Corrected_Predicted_Age',"Cing_Mean",
+                 "LAng_Mean","RAng_Mean", "Ang_Mean" ,"LTemp_Mean", "RTemp_Mean", "Temp_Mean" )]
+  data = na.omit(data)
+  if(formula_delta){
+    
+    og = lmer(Cing_Mean ~ 1 + Actual_Age+ APOE4+ delta_age*year + BMI+(1 + year|RID),data, REML = FALSE)
+    og.n = lmer(Cing_Mean ~ 1 + Actual_Age+ APOE4+ delta_age+year+BMI+ (1 + year|RID),data, REML = FALSE)
+    k = anova(og,og.n)
+    rownames(k) = c("Cing_Mean_with_delta_age*year","Cing_Mean_without_delta_age*year")
+    og2 = lmer(Ang_Mean ~ 1 + Actual_Age+ APOE4+ delta_age*year + BMI+(1 + year|RID),data, REML = FALSE)
+    og.n2 = lmer(Ang_Mean ~ 1 + Actual_Age+ APOE4+ delta_age+year+ BMI+(1 + year|RID),data, REML = FALSE)
+    k2 = anova(og2,og.n2)
+    rownames(k2) = c("Ang_Mean_with_delta_age*year","Ang_Mean_without_delta_age*year")
+    og3 = lmer(LTemp_Mean ~ 1 + Actual_Age+ APOE4+ delta_age*year + BMI+(1 + year|RID),data, REML = FALSE)
+    og.n3 = lmer(LTemp_Mean ~ 1 + Actual_Age+ APOE4+ delta_age+year+ BMI+(1 + year|RID),data, REML = FALSE)
+    k3 = anova(og3,og.n3)
+    rownames(k3) = c("LTemp_Mean_with_delta_age*year","LTemp_Mean_without_delta_age*year")
+    og4 = lmer(RTemp_Mean ~ 1 + Actual_Age+ APOE4+ delta_age*year + BMI+(1 + year|RID),data, REML = FALSE)
+    og.n4 = lmer(RTemp_Mean ~ 1 + Actual_Age+ APOE4+ delta_age+year+ BMI+(1 + year|RID),data, REML = FALSE)
+    k4 = anova(og4,og.n4)
+    rownames(k4) = c("RTemp_Mean_with_delta_age*year","RTemp_Mean_without_delta_age*year")
+    og5 = lmer(Temp_Mean ~ 1 + Actual_Age+ APOE4+ delta_age*year + BMI+(1 + year|RID),data, REML = FALSE)
+    og.n5 = lmer(Temp_Mean ~ 1 + Actual_Age+ APOE4+ delta_age+year+ BMI+(1 + year|RID),data, REML = FALSE)
+    k5 = anova(og5,og.n5)
+    rownames(k5) = c("Temp_Mean_with_delta_age*year","Temp_Mean_without_delta_age*year")
+    og6 = lmer(LAng_Mean ~ 1 + Actual_Age+ APOE4+ delta_age*year + BMI+(1 + year|RID),data, REML = FALSE)
+    og.n6 = lmer(LAng_Mean ~ 1 + Actual_Age+ APOE4+ delta_age+year+ BMI+(1 + year|RID),data, REML = FALSE)
+    k6 = anova(og6,og.n6)
+    rownames(k6) = c("LAng_Mean_with_delta_age*year","LAng_Mean_without_delta_age*year")
+    og7 = lmer(RAng_Mean ~ 1 + Actual_Age+ APOE4+ delta_age*year + BMI+(1 + year|RID),data, REML = FALSE)
+    og.n7 = lmer(RAng_Mean ~ 1 + Actual_Age+ APOE4+ delta_age+year+ BMI+(1 + year|RID),data, REML = FALSE)
+    k7 = anova(og3,og.n3)
+    rownames(k7) = c("RAng_Mean_with_delta_age*year","RAng_Mean_without_delta_age*year")
+    k = rbind(k,k2,k3,k4,k5,k6,k7)
+    
+  }else{
+    
+    og = lmer(Cing_Mean ~ 1 + Actual_Age+ APOE4+ Corrected_Predicted_Age*year + BMI+(1 + year|RID),data, REML = FALSE)
+    og.n = lmer(Cing_Mean ~ 1 + Actual_Age+ APOE4+ Corrected_Predicted_Age+year+BMI+ (1 + year|RID),data, REML = FALSE)
+    k = anova(og,og.n)
+    rownames(k) = c("Cing_Mean_with_Corrected_Predicted_Age*year","Cing_Mean_without_Corrected_Predicted_Age*year")
+    og2 = lmer(Ang_Mean ~ 1 + Actual_Age+ APOE4+ Corrected_Predicted_Age*year +BMI+ (1 + year|RID),data, REML = FALSE)
+    og.n2 = lmer(Ang_Mean ~ 1 + Actual_Age+ APOE4+ Corrected_Predicted_Age+year+ BMI+(1 + year|RID),data, REML = FALSE)
+    k2 = anova(og2,og.n2)
+    rownames(k2) = c("Ang_Mean_with_Corrected_Predicted_Age*year","Ang_Mean_without_Corrected_Predicted_Age*year")
+    og3 = lmer(LTemp_Mean ~ 1 + Actual_Age+ APOE4+ Corrected_Predicted_Age*year + BMI+(1 + year|RID),data, REML = FALSE)
+    og.n3 = lmer(LTemp_Mean ~ 1 + Actual_Age+ APOE4+ Corrected_Predicted_Age+year+ BMI+(1 + year|RID),data, REML = FALSE)
+    k3 = anova(og3,og.n3)
+    rownames(k3) = c("LTemp_Mean_with_Corrected_Predicted_Age*year","LTemp_Mean_without_Corrected_Predicted_Age*year")
+    
+    k = rbind(k,k2,k3)
+    
+  }
+  out_list = list('Cing_Mean_model' = og,
+                  'Ang_Mean_model' = og2,
+                  'Temp_Mean_model' = og3,
+                  'model_stats' = k)
+  return(out_list)
+}
+cognition_interaction_effect = function(data, formula_delta = TRUE,months = FALSE,type_sub = type_sub){
+  
+  if(formula_delta){
+    data1 = data$'_ADNI_MEM'
+    data1$APOE4 = as.factor(data1$APOE4)
+    if(type_sub!=""){data1$Sex = as.factor(data1$Sex)}
+    data1_subjects_more_than_one = names(table(data1$RID)[table(data1$RID) != 1])
+    data1 = data1 %>% filter(RID %in% data1_subjects_more_than_one)
+    data1 = data1[,c('Actual_Age','delta_age','year','Sex','Education','RID','Corrected_Predicted_Age','ADNI_MEM')]
+    data1 = na.omit(data1)
+    og = lmer(ADNI_MEM ~ 1 + Actual_Age+ Sex+ delta_age*year + Education+ (1 + year|RID),data1, REML = FALSE)
+    og.n = lmer(ADNI_MEM ~ 1 + Actual_Age+ Sex+ delta_age+year+Education+ (1 + year|RID),data1, REML = FALSE)
+    k = anova(og,og.n)
+    rownames(k) = c("ADNI_MEM_with_delta_age*year","ADNI_MEM_without_delta_age*year")
+    
+    data2 = data$'_ADNI_EF'
+    data2$APOE4 = as.factor(data2$APOE4)
+    if(type_sub!=""){data2$Sex = as.factor(data2$Sex)}
+    data2_subjects_more_than_one = names(table(data2$RID)[table(data2$RID) != 1])
+    data2 = data2 %>% filter(RID %in% data2_subjects_more_than_one)
+    data2 = data2[,c('Actual_Age','delta_age','year','Sex','Education','RID','Corrected_Predicted_Age','ADNI_EF')]
+    data2 = na.omit(data2)
+    if(months){data2$year = data2$year * 12}
+   # data2 = data2 %>% filter(VISCODE2 %in% c('bl','m06','m12','m18','m24','m36','m48'))
+    og2 = lmer(ADNI_EF ~ 1 + Actual_Age+ Sex+ delta_age*year + Education+(1 + year|RID),data2, REML = FALSE)
+    og.n2 = lmer(ADNI_EF ~ 1 + Actual_Age+ Sex+ delta_age+year+Education+ (1 + year|RID),data2, REML = FALSE)
+    k2 = anova(og2,og.n2)
+    rownames(k2) = c("ADNI_EF_with_delta_age*year","ADNI_EF_without_delta_age*year") 
+    
+    data3 = data$'_ADNI_LAN'
+    data3$APOE4 = as.factor(data3$APOE4)
+    if(type_sub!=""){data3$Sex = as.factor(data3$Sex)}
+    data3_subjects_more_than_one = names(table(data3$RID)[table(data3$RID) != 1])
+    data3 = data3 %>% filter(RID %in% data3_subjects_more_than_one)
+    data3 = data3[,c('Actual_Age','delta_age','year','Sex','Education','RID','Corrected_Predicted_Age','ADNI_LAN')]
+    data3 = na.omit(data3)
+    og3 = lmer(ADNI_LAN ~ 1 + Actual_Age+ Sex+ delta_age*year + Education+ (1 + year|RID),data3, REML = FALSE)
+    og.n3 = lmer(ADNI_LAN ~ 1 + Actual_Age+ Sex+ delta_age+year+Education+ (1 + year|RID),data3, REML = FALSE)
+    k3 = anova(og3,og.n3)
+    rownames(k3) = c("ADNI_LAN_with_delta_age*year","ADNI_LAN_without_delta_age*year")
+  }else{
+    data1 = data$'_ADNI_MEM'
+    data1$APOE4 = as.factor(data1$APOE4)
+    data1$Sex = as.factor(data1$Sex)
+    data1_subjects_more_than_one = names(table(data1$RID)[table(data1$RID) != 1])
+    data1 = data1 %>% filter(RID %in% data1_subjects_more_than_one)
+    data1 = data1[,c('Actual_Age','APOE4','delta_age','year','Sex','Education','RID','Corrected_Predicted_Age','ADNI_MEM')]
+    data1 = na.omit(data1)
+    og = lmer(ADNI_MEM ~ 1 + Actual_Age+ Sex+ Corrected_Predicted_Age*year + Education+ (1 + year|RID),data1, REML = FALSE)
+    og.n = lmer(ADNI_MEM ~ 1 + Actual_Age+ Sex+ Corrected_Predicted_Age+year+Education+ (1 + year|RID),data1, REML = FALSE)
+    k = anova(og,og.n)
+    data2 = data$'_ADNI_EF'
+    data2$APOE4 = as.factor(data2$APOE4)
+    data2$Sex = as.factor(data2$Sex)
+    data2_subjects_more_than_one = names(table(data2$RID)[table(data2$RID) != 1])
+    data2 = data2 %>% filter(RID %in% data2_subjects_more_than_one)
+    data2 = data2[,c('Actual_Age','APOE4','delta_age','year','Sex','Education','RID','Corrected_Predicted_Age','ADNI_EF')]
+    data2 = na.omit(data2)
+    if(months){data2$year = data2$year * 12}
+    rownames(k) = c("ADNI_MEM_with_Corrected_Predicted_Age*year","ADNI_MEM_without_Corrected_Predicted_Age*year")
+    og2 = lmer(ADNI_EF ~ 1 + Actual_Age+ Sex+ Corrected_Predicted_Age*year + Education+(1 + year|RID),data2, REML = FALSE)
+    og.n2 = lmer(ADNI_EF ~ 1 + Actual_Age+ Sex+ Corrected_Predicted_Age+year+Education+ (1 + year|RID),data2, REML = FALSE)
+    k2 = anova(og2,og.n2)
+    rownames(k2) = c("ADNI_EF_with_Corrected_Predicted_Age*year","ADNI_EF_without_Corrected_Predicted_Age*year")
+  }
+
+  k = rbind(k,k2,k3)
+    
+  out_list = list('ADNI_MEM_model' = og,
+                  'ADNI_EF_model' = og2,
+                  'ADNI_LAN_model' = og3,
+                  'model_stats' = k)
+  return(out_list)
+}
+make_effect_plot = function(data, model, name, cog = F){
+  if(cog == 'ADNI_MEM'){
+    data_subjects_more_than_one = names(table(data$RID)[table(data$RID) != 1])
+    data = data %>% filter(RID %in% data_subjects_more_than_one)
+    data = data[,c('Actual_Age','delta_age','year','Sex','Education','RID','Corrected_Predicted_Age','ADNI_MEM')]
+  }else if(cog == 'ADNI_EF'){
+    data_subjects_more_than_one = names(table(data$RID)[table(data$RID) != 1])
+    data = data %>% filter(RID %in% data_subjects_more_than_one)
+    data = data[,c('Actual_Age','delta_age','year','Sex','Education','RID','Corrected_Predicted_Age','ADNI_EF')]
+  }else if(cog == 'ADNI_LAN'){
+    data_subjects_more_than_one = names(table(data$RID)[table(data$RID) != 1])
+    data = data %>% filter(RID %in% data_subjects_more_than_one)
+    data = data[,c('Actual_Age','delta_age','year','Sex','Education','RID','Corrected_Predicted_Age','ADNI_LAN')]
+  }else if(cog == F){
+    cat('Non Cognitive Phenotype')
+  }
+  data = na.omit(data)
+  # Define quartiles of Corrected_Predicted_Age
+  quartiles <- quantile(data$Corrected_Predicted_Age, probs = c(0, 0.25, 0.5, 0.75, 1))
+  data$delta_age_quartile <- cut(data$Corrected_Predicted_Age, breaks = quartiles, labels = c("Q1", "Q2", "Q3", "Q4"), include.lowest = TRUE)
+  
+  pred1=predict(model,re.form=NA,se.fit=TRUE,nsim=500)
+  
+  # save prediction results
+  Long_MRI=data
+  Long_MRI$boot_fit=pred1$fit
+  
+  # Only plot Q1 and Q4 
+  plot_Q1Q4=Long_MRI%>%filter(delta_age_quartile=="Q1"|delta_age_quartile=="Q4")   
+  
+  # Can change colors, linewidth, x labels, y labels or add title as needed
+  p = ggplot(plot_Q1Q4,aes(x=year,y=boot_fit,col=delta_age_quartile))+geom_smooth(aes(year,boot_fit),linewidth=1.5,method=lm,se=TRUE)+
+    ylab(paste0(name,"_pred"))+xlab("Year")+ggtitle("")+scale_color_manual(values=c("blue","red"))
+  
+  return(p)
+}
+make_bars_of_counts = function(data,col_counts, thresh = 5,title,cogn=FALSE){
+
+  start = TRUE
+  for(item in col_counts){
+    if(cogn){
+      data_t = data[[paste0('_',item)]]
+    }else{
+      data_t = data
+    }
+    data_t = na.omit(data_t[,c(item,'VISCODE2','year')])
+    data_t = data_t %>% filter(year <= thresh)
+    data_t = data_t[which(data_t$year%%1 == 0),]
+    if(start){
+      df = as.data.frame(table(data_t$VISCODE2))
+      df = df[which(df$Freq != 0),]
+      df$Phenotype = item
+      start = F
+    }else{
+      t = as.data.frame(table(data_t$VISCODE2))
+      t = t[which(t$Freq != 0),]
+      t$Phenotype = item
+      df = rbind(df,t)
+    }
+    
+  }
+  
+  my_bar = ggplot(df,aes(x = Var1, y =Freq, fill = Phenotype)) + 
+    geom_bar(stat = "identity", position = "dodge") + ylim(NA,1400) +ylab('Subjects') + ggtitle(title) + xlab(paste0('Time points upto ',str(thresh),' years'))
+  return(my_bar)
+}
+par(mfrow = c(3, 3))
+make_bars_of_counts(mri_adni_data_bl_delta_age,col_counts = c('HippVol','entorhinal_thickness'), title = 'MRI')
+make_bars_of_counts(csf_bl_delta_age,col_counts = c('ABETA','TAU','PTAU'), title = 'CSF')
+make_bars_of_counts(plasma_bl_delta_age,col_counts = c('AB40','AB42'), title = 'Plasma')
+make_bars_of_counts(fdg_bl_delta_age,col_counts = c('Cing_Mean','LTemp_Mean','Ang_Mean'), title = 'FDG')
+make_bars_of_counts(cognitive_scores,col_counts = c('ADNI_EF','ADNI_MEM','ADNI_LAN'),cogn = T, title = 'Cognitive Scores')
+
+# Delta Age Based Association ---------------------------------------------
+
+
+interaction_models_stats_mri = mri_interaction_effect(mri_adni_data_bl_delta_age)
+interaction_models_stats_mri$model_stats
+
+interaction_models_stats_csf = csf_interaction_effect(csf_bl_delta_age)
+interaction_models_stats_csf$model_stats
+
+interaction_models_stats_fdg = fdg_interaction_effect(fdg_bl_delta_age)
+interaction_models_stats_fdg$model_stats
+
+interaction_models_stats_plasma = plasma_interaction_effect(plasma_bl_delta_age)
+interaction_models_stats_plasma$model_stats
+
+interaction_models_stats_cog = cognition_interaction_effect(cognitive_scores,months = F)
+interaction_models_stats_cog$model_stats
+
+
+# Predicted Age Based Association -----------------------------------------
+
+
+# #with Predicted_Age
+# 
+# interaction_models_stats_mri = mri_interaction_effect(mri_adni_data_bl_delta_age, formula_delta = FALSE)
+# interaction_models_stats_mri$model_stats
+# 
+# 
+# interaction_models_stats_csf = csf_interaction_effect(csf_bl_delta_age, formula_delta = FALSE)
+# interaction_models_stats_csf$model_stats
+# 
+# interaction_models_stats_fdg = fdg_interaction_effect(fdg_bl_delta_age, formula_delta = FALSE)
+# interaction_models_stats_fdg$model_stats
+# 
+# interaction_models_stats_plasma = plasma_interaction_effect(plasma_bl_delta_age, formula_delta = FALSE)
+# interaction_models_stats_plasma$model_stats
+# 
+# interaction_models_stats_cog = cognition_interaction_effect(cognitive_scores, formula_delta = FALSE)
+# interaction_models_stats_cog$model_stats
+
+
+# Effect PLots ------------------------------------------------------------
+
+
+
+make_effect_plot(mri_adni_data_bl_delta_age,interaction_models_stats_mri$hipp_model, 'Hipp')
+make_effect_plot(mri_adni_data_bl_delta_age,interaction_models_stats_mri$ent_model, 'Ent')
+# 
+make_effect_plot(csf_bl_delta_age,interaction_models_stats_csf$TAU_model, 'TAU')
+make_effect_plot(csf_bl_delta_age,interaction_models_stats_csf$PTAU_model, 'PTAU')
+make_effect_plot(csf_bl_delta_age,interaction_models_stats_csf$ABETA_model, 'ABETA')
+# 
+make_effect_plot(fdg_bl_delta_age,interaction_models_stats_fdg$Temp_Mean_model, 'Left Temporal')
+make_effect_plot(fdg_bl_delta_age,interaction_models_stats_fdg$Cing_Mean_model, 'Cingulate')
+
+make_effect_plot(plasma_bl_delta_age,interaction_models_stats_plasma$AB40_model, 'AB40')
+make_effect_plot(plasma_bl_delta_age,interaction_models_stats_plasma$AB42_model, 'AB42')
+
+make_effect_plot(cognitive_scores$`_ADNI_MEM`,interaction_models_stats_cog$ADNI_MEM_model, 'ADNI_MEM',cog = 'ADNI_MEM')
+make_effect_plot(cognitive_scores$`_ADNI_EF`,interaction_models_stats_cog$ADNI_EF_model, 'ADNI_EF',cog = 'ADNI_EF')
+make_effect_plot(cognitive_scores$`_ADNI_LAN`,interaction_models_stats_cog$ADNI_LAN_model, 'ADNI_LAN',cog = 'ADNI_LAN')
