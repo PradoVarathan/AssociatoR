@@ -29,7 +29,7 @@ run_cross_sectional_association = function(data, targets,timepoint, formula, fdr
     temp_p_vals = summary(lin_fit)$coefficients[,4]
     temp_coef_vals = summary(lin_fit)$coefficients[,1]
     temp_main_adj_r2 = summary(lin_fit)$adj.r.squared
-    factors = columns_needed[-1]
+    factors = columns_needed
     temp_df = data.frame(matrix(ncol = length(factors), nrow = 0))
     colnames(temp_df) = sapply(factors, function(x){return(paste0(x,'_Var_Exp'))})
 
