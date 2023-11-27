@@ -61,7 +61,7 @@ run_longitudinal_interaction_association = function(data, targets, threshold_yea
 
       df = data.frame("residulas" = resid(og))
       p <- ggplot(df, aes(x=residulas)) +
-        geom_histogram() + xlab('Residual Value') + title(target)
+        geom_histogram() + xlab('Residual Value') + ggtitle(target)
       residual_plots[target] = p
 
     }
