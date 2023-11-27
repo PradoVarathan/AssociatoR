@@ -30,8 +30,8 @@ run_longitudinal_interaction_association = function(data, targets, threshold_yea
 
     target_formula = paste0(target,formula)
 
-    og = lmer(target_formula,data, REML = FALSE)
-    og.n = lmer(chartr("*","+",target_formula),data, REML = FALSE)
+    og = lmer(as.formula(target_formula),data, REML = FALSE)
+    og.n = lmer(as.formula(chartr("*","+",target_formula)),data, REML = FALSE)
 
     k = anova(og,og.n)
     p_val = k$`Pr(>Chisq)`[2]
