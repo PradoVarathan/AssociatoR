@@ -28,7 +28,7 @@ run_longitudinal_interaction_association = function(data, targets, threshold_yea
   out_data_frame  = list()
   for(target in targets){
 
-    target_formula = paste0(target,formula)
+    target_formula = paste(target,formula, sep = ' ~ ')
 
     og = lmer(as.formula(target_formula),data, REML = FALSE)
     og.n = lmer(as.formula(chartr("*","+",target_formula)),data, REML = FALSE)
