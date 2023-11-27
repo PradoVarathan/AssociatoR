@@ -55,14 +55,14 @@ run_longitudinal_interaction_association = function(data, targets, threshold_yea
         ylab(paste0(target,"_pred"))+xlab("Year")+ggtitle(paste0(paste0(target_factor,collapse = "*")," p-value: ",if(p_val > 0.00005){as.character(round(p_val,5))}else{p_val}))+
                                                             scale_color_manual(values=c("blue","red"))
 
-      effect_plots[target] = p
+      effect_plots[[target]] = p
     }
     if(plot_residuals){
 
       df = data.frame("residulas" = resid(og))
       p <- ggplot(df, aes(x=residulas)) +
         geom_histogram() + xlab('Residual Value') + ggtitle(target)
-      residual_plots[target] = p
+      residual_plots[[target]] = p
 
     }
 
