@@ -52,7 +52,7 @@ run_longitudinal_interaction_association = function(data, targets, threshold_yea
 
       # Can change colors, linewidth, x labels, y labels or add title as needed
       p = ggplot(plot_Q1Q4,aes(x=year,y=boot_fit,col=Quartiles))+geom_smooth(aes(year,boot_fit),linewidth=1.5,method=lm,se=TRUE)+
-        ylab(paste0(target,"_pred"))+xlab("Year")+ggtitle(paste0(paste0(target_factor,collapse = "*")," p-value: ",if(p_val > 0.00005){as.character(round(p_val,5))}else{p_val}))+
+        ylab(paste0(target,"_pred"))+xlab("Year")+ggtitle(paste0(" p-val: ",if(p_val > 0.00005){as.character(round(p_val,5))}else{p_val}))+
                                                             scale_color_manual(values=c("blue","red"))
 
       effect_plots[[target]] = p
