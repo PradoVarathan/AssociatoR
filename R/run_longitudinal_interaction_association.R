@@ -72,11 +72,15 @@ run_longitudinal_interaction_association = function(data, targets, threshold_yea
 
   out_list = list('p_values' = out_data_frame)
   if(plot_effect){
-    out_list = list(out_list,'effect_plots' =  effect_plots)
-  }
-  if(plot_residuals){
-    out_list = list(out_list,)
-  }
+      if(plot_residuals){
+    out_list = list('p_values' = out_data_frame,'effect_plots' =  effect_plots,'residual_plots' = residual_plots)
+  }else{
+    out_list = list('p_values' = out_data_frame,'effect_plots' =  effect_plots)
+    }
+  }else if(plot_residuals){
+    out_list = list('p_values' = out_data_frame,'residual_plots' =  residual_plots)
+    }
+
   return(out_list)
 
 }
