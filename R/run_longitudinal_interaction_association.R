@@ -17,7 +17,7 @@ run_longitudinal_interaction_association = function(data, targets, threshold_yea
   #Filtering data
   data = data %>% filter(year < threshold_years)
   columns_needed = unique(strsplit(formula,' ')[[1]][sapply(strsplit(formula,' ')[[1]],function(str){!grepl("[^A-Za-z0-9_ ]", str)})])
-  columns_needed =  columns_needed[is.na(as.numeric(columns_needed))]
+  columns_needed =  columns_needed[suppressWarnings(is.na(as.numeric(columns_needed)))]
   data = data[,c(columns_needed,targets)]
   target_factor = strsplit(formula,' ')[[1]][c(which(strsplit(formula,' ')[[1]] == '*')-1,which(strsplit(formula,' ')[[1]] == '*')+1)]
   data = na.omit(data)
