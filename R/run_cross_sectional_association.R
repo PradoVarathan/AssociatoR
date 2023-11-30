@@ -13,7 +13,7 @@
 run_cross_sectional_association = function(data, targets,timepoint, formula, fdr_correction = FALSE){
 
   #Filtering data
-  data = data %>% filter(timepoint == timepoint)
+  data = data[which(data$timepoint == timepoint),]
   columns_needed = strsplit(formula,' ')[[1]][sapply(strsplit(formula,' ')[[1]],function(str){!grepl("[^A-Za-z0-9_ ]", str)})]
   data = data[,c(columns_needed,targets)]
 
