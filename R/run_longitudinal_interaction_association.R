@@ -12,7 +12,7 @@
 #' @export
 #'
 #' @examples
-run_longitudinal_interaction_association = function(data, targets, threshold_years = 5, formula, plot_effect = TRUE, plot_residuals = FALSE,beta = FALSE){
+run_longitudinal_interaction_association = function(data, targets, threshold_years = 5, formula, plot_effect = TRUE, plot_residuals = FALSE){
 
   #Filtering data
   data = data %>% filter(year <= threshold_years)
@@ -74,15 +74,12 @@ run_longitudinal_interaction_association = function(data, targets, threshold_yea
   out_list = list('p_values' = out_data_frame)
   if(plot_effect){
       if(plot_residuals){
-    out_list = list('p_values' = out_data_frame,'effect_plots' =  effect_plots,'residual_plots' = residual_plots)
+    out_list = list('p_values' = out_data_frame,'effect_plots' =  effect_plots,'residual_plots' = residual_plots,'beta' = beta_data_frame)
   }else{
-    out_list = list('p_values' = out_data_frame,'effect_plots' =  effect_plots)
+    out_list = list('p_values' = out_data_frame,'effect_plots' =  effect_plots,'beta' = beta_data_frame)
     }
   }else if(plot_residuals){
-    out_list = list('p_values' = out_data_frame,'residual_plots' =  residual_plots)
-    }
-  if(beta){
-    out_list[beta] = beta_data_frame
+    out_list = list('p_values' = out_data_frame,'residual_plots' =  residual_plots,'beta' = beta_data_frame)
     }
   return(out_list)
 
