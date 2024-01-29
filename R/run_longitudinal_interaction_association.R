@@ -12,7 +12,7 @@
 #' @export
 #'
 #' @examples
-run_longitudinal_interaction_association = function(data, targets, threshold_years = 5, formula, plot_effect = TRUE, plot_residuals = FALSE){
+run_longitudinal_interaction_association = function(data, targets, threshold_years = 5, formula, plot_effect = TRUE, plot_residuals = FALSE,beta = FALSE){
 
   #Filtering data
   data = data %>% filter(year <= threshold_years)
@@ -26,17 +26,18 @@ run_longitudinal_interaction_association = function(data, targets, threshold_yea
   effect_plots = list()
   residual_plots = list()
   out_data_frame  = list()
+  beta_data_frame = list()
   for(target in targets){
 
     target_formula = paste(target,formula, sep = ' ~ ')
 
     og = lmer(as.formula(target_formula),data, REML = FALSE)
     og.n = lmer(as.formula(chartr("*","+",target_formula)),data, REML = FALSE)
-
+    temp_og = summary(og)
     k = anova(og,og.n)
     p_val = k$`Pr(>Chisq)`[2]
     out_data_frame[target] = p_val
-
+    beta_data_frame[target] = temp_og$coefficients[nrow(temp_og$coefficients),1]
     if(plot_effect){
 
       Quartiles <- quantile(data[,colnames(data) == target_factor[1]], probs = c(0, 0.25, 0.5, 0.75, 1))
@@ -80,7 +81,9 @@ run_longitudinal_interaction_association = function(data, targets, threshold_yea
   }else if(plot_residuals){
     out_list = list('p_values' = out_data_frame,'residual_plots' =  residual_plots)
     }
-
+  if(beta){
+    out_list[beta] = beta_data_frame
+    }
   return(out_list)
 
 }
