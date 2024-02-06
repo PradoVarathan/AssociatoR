@@ -27,6 +27,8 @@ run_longitudinal_interaction_association = function(data, targets, threshold_yea
   residual_plots = list()
   out_data_frame  = list()
   beta_data_frame = list()
+  t_data_frame = list()
+  std_err_data_frame = list()
   for(target in targets){
 
     target_formula = paste(target,formula, sep = ' ~ ')
@@ -38,6 +40,8 @@ run_longitudinal_interaction_association = function(data, targets, threshold_yea
     p_val = k$`Pr(>Chisq)`[2]
     out_data_frame[target] = p_val
     beta_data_frame[target] = temp_og$coefficients[nrow(temp_og$coefficients),1]
+    t_data_frame[target] = temp_og$coefficients[nrow(temp_og$coefficients),3]
+    std_err_data_frame[target] =  temp_og$coefficients[nrow(temp_og$coefficients),2]
     if(plot_effect){
 
       Quartiles <- quantile(data[,colnames(data) == target_factor[1]], probs = c(0, 0.25, 0.5, 0.75, 1))
@@ -74,12 +78,12 @@ run_longitudinal_interaction_association = function(data, targets, threshold_yea
   out_list = list('p_values' = out_data_frame)
   if(plot_effect){
       if(plot_residuals){
-    out_list = list('p_values' = out_data_frame,'effect_plots' =  effect_plots,'residual_plots' = residual_plots,'beta' = beta_data_frame)
+    out_list = list('p_values' = out_data_frame,'effect_plots' =  effect_plots,'residual_plots' = residual_plots,'beta' = beta_data_frame,'t_values' = t_data_frame,'std_err_values' = std_err_data_frame)
   }else{
-    out_list = list('p_values' = out_data_frame,'effect_plots' =  effect_plots,'beta' = beta_data_frame)
+    out_list = list('p_values' = out_data_frame,'effect_plots' =  effect_plots,'beta' = beta_data_frame,'t_values' = t_data_frame,'std_err_values' = std_err_data_frame)
     }
   }else if(plot_residuals){
-    out_list = list('p_values' = out_data_frame,'residual_plots' =  residual_plots,'beta' = beta_data_frame)
+    out_list = list('p_values' = out_data_frame,'residual_plots' =  residual_plots,'beta' = beta_data_frame,'t_values' = t_data_frame,'std_err_values' = std_err_data_frame)
     }
   return(out_list)
 
