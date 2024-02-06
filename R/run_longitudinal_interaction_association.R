@@ -12,7 +12,7 @@
 #' @export
 #'
 #' @examples
-run_longitudinal_interaction_association = function(data, targets, threshold_years = 5, formula, plot_effect = TRUE, plot_residuals = FALSE){
+run_longitudinal_interaction_association = function(data, targets, predictor_main = "delta_age" ,threshold_years = 5, formula, plot_effect = TRUE, plot_residuals = FALSE){
 
   #Filtering data
   data = data %>% filter(year <= threshold_years)
@@ -44,8 +44,8 @@ run_longitudinal_interaction_association = function(data, targets, threshold_yea
     std_err_data_frame[target] =  temp_og$coefficients[nrow(temp_og$coefficients),2]
     if(plot_effect){
 
-      Quartiles <- quantile(data[,colnames(data) == target_factor[1]], probs = c(0, 0.25, 0.5, 0.75, 1))
-      data$Quartiles <- cut(data[,colnames(data) == target_factor[1]], breaks = Quartiles, labels = c("Q1", "Q2", "Q3", "Q4"), include.lowest = TRUE)
+      Quartiles <- quantile(data[,colnames(data) == predictor_main], probs = c(0, 0.25, 0.5, 0.75, 1))
+      data$Quartiles <- cut(data[,colnames(data) == predictor_main], breaks = Quartiles, labels = c("Q1", "Q2", "Q3", "Q4"), include.lowest = TRUE)
 
       pred1=predict(og,re.form=NA,se.fit=TRUE,nsim=500)
       # save prediction results
