@@ -37,7 +37,7 @@ run_longitudinal_interaction_association = function(data, targets, predictor_mai
     if(type == "interaction"){
       og.n = lmer(as.formula(chartr("*","+",target_formula)),data, REML = FALSE)
       }
-    else if{type == "none"){
+    else if(type == "none"){
       og.n = lmer(as.formula(gsub(paste0("[+] ",predictor_main," "),"",formula),data, REML = FALSE)
       }
     temp_og = summary(og)
