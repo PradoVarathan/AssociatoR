@@ -12,7 +12,7 @@
 #' @export
 #'
 #' @examples
-run_longitudinal_interaction_association = function(data, targets, predictor_main = "delta_age" ,threshold_years = 5, formula, plot_effect = TRUE, plot_residuals = FALSE){
+run_longitudinal_interaction_association = function(data, targets, predictor_main = "delta_age" ,type = "interaction",threshold_years = 5, formula, plot_effect = TRUE, plot_residuals = FALSE){
 
   #Filtering data
   data = data %>% filter(year <= threshold_years)
@@ -34,7 +34,12 @@ run_longitudinal_interaction_association = function(data, targets, predictor_mai
     target_formula = paste(target,formula, sep = ' ~ ')
 
     og = lmer(as.formula(target_formula),data, REML = FALSE)
-    og.n = lmer(as.formula(chartr("*","+",target_formula)),data, REML = FALSE)
+    if(type == "interaction"){
+      og.n = lmer(as.formula(chartr("*","+",target_formula)),data, REML = FALSE)
+      }
+    else if{type == "none"){
+      og.n = lmer(as.formula(gsub(paste0("[+] ",predictor_main," "),"",formula),data, REML = FALSE)
+      }
     temp_og = summary(og)
     k = anova(og,og.n)
     p_val = k$`Pr(>Chisq)`[2]
